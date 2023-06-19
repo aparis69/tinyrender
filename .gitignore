@@ -1,0 +1,5 @@
+build*/
+projects/x64/*
+resources/shaders/mainShader.glsl
+resources/shaders/shapeIdShader.glsl
+projects/.vs/*
