@@ -198,7 +198,7 @@ namespace tinyrender
 			fprintf(stderr, "ERROR: Could not compile shader: failed to compile %s!\n", desc);
 		if (log_length > 1)
 		{
-			char* buf = new char[uint(log_length + 1)];
+			char* buf = new char[int(log_length + 1)];
 			glGetShaderInfoLog(handle, log_length, NULL, (GLchar*)buf);
 			fprintf(stderr, "%s\n", buf);
 			delete[] buf;
@@ -222,12 +222,12 @@ namespace tinyrender
 		glBindVertexArray(ret.vao);
 
 		// OpenGL buffers
-		uint fullSize = sizeof(v3f) * uint(obj.vertices.size() + obj.normals.size() + obj.colors.size());
+		int fullSize = sizeof(v3f) * int(obj.vertices.size() + obj.normals.size() + obj.colors.size());
 		glGenBuffers(1, &ret.buffers);
 		glBindBuffer(GL_ARRAY_BUFFER, ret.buffers);
 		glBufferData(GL_ARRAY_BUFFER, fullSize, nullptr, GL_STATIC_DRAW);
-		uint size = 0;
-		uint offset = 0;
+		int size = 0;
+		int offset = 0;
 		size = sizeof(v3f) * obj.vertices.size();
 		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.vertices.front());
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
@@ -247,7 +247,7 @@ namespace tinyrender
 		}
 		glGenBuffers(1, &ret.triangleBuffer);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ret.triangleBuffer);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(uint) * obj.triangles.size(), &obj.triangles.front(), GL_STATIC_DRAW);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(int) * obj.triangles.size(), &obj.triangles.front(), GL_STATIC_DRAW);
 		ret.triangleCount = int(obj.triangles.size());
 
 		return ret;
@@ -258,7 +258,7 @@ namespace tinyrender
 	\param id object index
 	\param newObj new data for the object.
 	*/
-	static void _internalUpdateObject(uint id, const object& newObj)
+	static void _internalUpdateObject(int id, const object& newObj)
 	{
 		object_internal& obj = internalObjects[id];
 
@@ -286,7 +286,7 @@ namespace tinyrender
 	\brief Removes an object from the internal hierarchy.
 	\param id object index
 	*/
-	static void _internalDeleteObject(uint id)
+	static void _internalDeleteObject(int id)
 	{
 		object_internal& obj = internalObjects[id];
 		if (obj.isDeleted)
@@ -304,9 +304,9 @@ namespace tinyrender
 	/*
 	\brief
 	*/
-	static uint _internalGetNextFreeIndex()
+	static int _internalGetNextFreeIndex()
 	{
-		for (uint i = 0; i < internalObjects.size(); i++)
+		for (int i = 0; i < internalObjects.size(); i++)
 		{
 			if (internalObjects[i].isDeleted)
 				return i;
@@ -576,7 +576,7 @@ namespace tinyrender
 	*/
 	void terminate()
 	{
-		for (uint i = 0; i < internalObjects.size(); i++)
+		for (int i = 0; i < internalObjects.size(); i++)
 			_internalDeleteObject(i);
 		internalObjects.clear();
 		glfwTerminate();
@@ -589,10 +589,10 @@ namespace tinyrender
 	\param object new object
 	\returns the id of the object in the hierarchy.
 	*/
-	uint pushObject(const object& obj)
+	int pushObject(const object& obj)
 	{
 		object_internal internalObject = _internalCreateObject(obj);
-		uint index = _internalGetNextFreeIndex();
+		int index = _internalGetNextFreeIndex();
 		if (index == internalObjects.size())
 			internalObjects.push_back(internalObject);
 		else
@@ -610,7 +610,7 @@ namespace tinyrender
 	\param obj new object data
 	\returns true of update is successfull, false otherwise.
 	*/
-	void updateObject(uint id, const object& obj)
+	void updateObject(int id, const object& obj)
 	{
 		assert(id < internalObjects.size());
 		_internalUpdateObject(id, obj);
@@ -623,7 +623,7 @@ namespace tinyrender
 	\param pos new position
 	\param scale new scale
 	*/
-	void updateObject(uint id, const v3f& position, const v3f& scale)
+	void updateObject(int id, const v3f& position, const v3f& scale)
 	{
 		assert(id < internalObjects.size());
 		object_internal& obj = internalObjects[id];
@@ -635,7 +635,7 @@ namespace tinyrender
 	\param id identifier
 	\returns true of removal is successfull false otherwise.
 	*/
-	void popObject(uint id)
+	void popObject(int id)
 	{
 		assert(id < internalObjects.size());
 		_internalDeleteObject(id);
@@ -654,6 +654,62 @@ namespace tinyrender
 				return;
 			}
 		}
+	}
+
+	
+	/*!
+	\brief
+	*/
+	int pushPlaneRegularMesh(float size, int n)
+	{
+		v3f a({ -size, 0.0f, -size });
+		v3f b({ size, 0.0f, size });
+		v3f step = (b - a) / float(n - 1);
+		object planeObject;
+		
+		// Vertices
+		for (int i = 0; i < n; i++)
+		{
+			for (int j = 0; j < n; j++)
+			{
+				v3f v = a + v3f({ step.x * i, 0.f, step.z * j });
+				planeObject.vertices.push_back(v);
+				planeObject.normals.push_back({ 0.f, 1.f, 0.f });
+				planeObject.colors.push_back({ 0.7f, 0.7f, 0.7f });
+			}
+		}
+
+		// Triangles
+		for (int i = 0; i < n - 1; i++)
+		{
+			for (int j = 0; j < n - 1; j++)
+			{
+				int v0 = (j * n) + i;
+				int v1 = (j * n) + i + 1;
+				int v2 = ((j + 1) * n) + i;
+				int v3 = ((j + 1) * n) + i + 1;
+
+				// tri 0
+				planeObject.triangles.push_back(v0);
+				planeObject.triangles.push_back(v1);
+				planeObject.triangles.push_back(v2);
+
+				// tri 1
+				planeObject.triangles.push_back(v2);
+				planeObject.triangles.push_back(v1);
+				planeObject.triangles.push_back(v3);
+			}
+		}
+
+		return pushObject(planeObject);
+	}
+
+	/*!
+	\brief
+	*/
+	void pushPlaneDenseMesh(float size, int n)
+	{
+
 	}
 
 
