@@ -111,7 +111,6 @@ namespace tinyrender
 
 	// Provided simple mesh creation
 	int pushPlaneRegularMesh(float size, int n);
-	void pushPlaneDenseMesh(float size, int n);
 
 	// Camera
 	void setCameraEye(float x, float y, float z);

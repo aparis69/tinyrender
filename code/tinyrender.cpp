@@ -704,14 +704,6 @@ namespace tinyrender
 		return pushObject(planeObject);
 	}
 
-	/*!
-	\brief
-	*/
-	void pushPlaneDenseMesh(float size, int n)
-	{
-
-	}
-
 
 	/*!
 	\brief Set the camera eye position.
