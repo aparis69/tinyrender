@@ -106,6 +106,7 @@ namespace tinyrender
 	int pushObject(const object& obj);
 	void updateObject(int id, const object& obj);
 	void updateObject(int id, const v3f& position, const v3f& scale);
+	void updateObjectColors(int id, const std::vector<v3f>& newColors);
 	void popObject(int id);
 	void popFirst();
 

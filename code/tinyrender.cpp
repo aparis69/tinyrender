@@ -254,7 +254,7 @@ namespace tinyrender
 	}
 
 	/*
-	\brief Update an already created object with new vertice/normal data.
+	\brief Update an already created object with new vertice/normal/color data.
 	\param id object index
 	\param newObj new data for the object.
 	*/
@@ -280,6 +280,23 @@ namespace tinyrender
 			size = sizeof(v3f) * newObj.colors.size();
 			glBufferSubData(GL_ARRAY_BUFFER, offset, size, &newObj.colors.front());
 		}
+	}
+
+	/*
+	\brief Update an already created object with new color data.
+	\param id object index
+	\param newColors new color data for the object.
+	*/
+	static void _internalUpdateObject(int id, const std::vector<v3f>& newColors)
+	{
+		object_internal& obj = internalObjects[id];
+		glBindVertexArray(obj.vao);
+		glBindBuffer(GL_ARRAY_BUFFER, obj.buffers);
+		size_t size = 0;
+		size_t offset = 0;
+		size = sizeof(v3f) * newColors.size();
+		offset = offset + 2 * size; // offset = vertexCount + normalCount (and vertexCount == colorCount)
+		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &newColors.front());
 	}
 
 	/*
@@ -628,6 +645,18 @@ namespace tinyrender
 		assert(id < internalObjects.size());
 		object_internal& obj = internalObjects[id];
 		_internalComputeModelMatrix(obj.modelMatrix, position, scale);
+	}
+
+	/*!
+	\brief Update an object' colors given its id. 
+	\param id object id
+	\param newColors new per-vertex color array.
+	*/
+	void updateObjectColors(int id, const std::vector<v3f>& newColors)
+	{
+		assert(id < internalObjects.size());
+		assert(!newColors.empty());
+		_internalUpdateObject(id, newColors);
 	}
 
 	/*!

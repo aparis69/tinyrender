@@ -17,28 +17,24 @@ static void LoadMesh(const char* path, tinyrender::object& obj) {
 	if (!ret)
 		return;
 
-	for (size_t s = 0; s < shapes.size(); s++)
-	{
+	for (size_t s = 0; s < shapes.size(); s++) {
 		size_t index_offset = 0;
-		for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++)
-		{
+		for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
 			int fv = shapes[s].mesh.num_face_vertices[f];
-			for (size_t v = 0; v < fv; v++)
-			{
+			for (size_t v = 0; v < fv; v++)	{
 				// tinyobj index
 				tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
 
 				// Vertex
-				obj.vertices.push_back(
-					{
+				obj.vertices.push_back({
 						attrib.vertices[3 * idx.vertex_index + 0],
 						attrib.vertices[3 * idx.vertex_index + 1],
 						attrib.vertices[3 * idx.vertex_index + 2]
 					}
 				);
+
 				// Normals
-				obj.normals.push_back(
-					{
+				obj.normals.push_back({
 						attrib.normals[3 * idx.normal_index + 0],
 						attrib.normals[3 * idx.normal_index + 1],
 						attrib.normals[3 * idx.normal_index + 2]
@@ -69,20 +65,26 @@ int main() {
 	tinyrender::pushPlaneRegularMesh(10.0f, 256);
 	
 	tinyrender::object obj;
-	obj.position = { 0.f, 2.f, 0.f };
 	LoadMesh("../sphere.obj", obj);
 	obj.colors.resize(obj.vertices.size());
 	for (auto& col : obj.colors) {
 		col = { Uniform(), Uniform(), Uniform() };
 	}
-	tinyrender::pushObject(obj);
+	int id = tinyrender::pushObject(obj);
 
 	while (!tinyrender::shouldQuit())
 	{
+		// Test: dynamic update of colors
+		//for (auto& col : obj.colors) {
+		//	col = { Uniform(), Uniform(), Uniform() };
+		//}
+		//tinyrender::updateObjectColors(id, obj.colors);
+
 		tinyrender::update();
 		tinyrender::render();
 		tinyrender::swap();
 	}
+
 	tinyrender::terminate();
 	return 0;
 }
