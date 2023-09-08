@@ -362,17 +362,18 @@ namespace tinyrender
 			return;
 		}
 		glfwMakeContextCurrent(windowPtr);
+		glfwSwapInterval(1);
 		glfwSetInputMode(windowPtr, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 		glfwSetWindowSizeCallback(windowPtr, [](GLFWwindow* win, int w, int h)
-			{
-				glViewport(0, 0, w, h);
-				width_internal = w;
-				height_internal = h;
-			});
+		{
+			glViewport(0, 0, w, h);
+			width_internal = w;
+			height_internal = h;
+		});
 		glfwSetScrollCallback(windowPtr, [](GLFWwindow* win, double x, double y)
-			{
-				_internalCameraMove(0.0f, 0.0f, y * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
-			});
+		{
+			_internalCameraMove(0.0f, 0.0f, y * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
+		});
 
 		// OpenGL
 		// -------------------------------------------------------------------------------
