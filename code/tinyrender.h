@@ -10,8 +10,6 @@
 
 namespace tinyrender
 {
-#define uint unsigned int
-
 	typedef struct v3f
 	{
 	public:
@@ -69,6 +67,10 @@ namespace tinyrender
 	{
 		return v3f({ l.x * x, l.y * x, l.z * x });
 	}
+	inline v3f operator/(const v3f& l, float x)
+	{
+		return v3f({ l.x / x, l.y / x, l.z / x });
+	}
 	inline v3f operator-(const v3f& l)
 	{
 		return v3f({ -l.x, -l.y, -l.z });
@@ -100,12 +102,24 @@ namespace tinyrender
 	void swap();
 	void terminate();
 
-	uint pushObject(const object& obj);
-	void updateObject(uint id, const object& obj);
-	void updateObject(uint id, const v3f& position, const v3f& scale);
-	void popObject(uint id);
+	// 3D objects
+	int pushObject(const object& obj);
+	void updateObject(int id, const object& obj);
+	void updateObject(int id, const v3f& position, const v3f& scale);
+	void updateObjectColors(int id, const std::vector<v3f>& newColors);
+	void popObject(int id);
 	void popFirst();
 
+	// Parameters
+	void setDoLighting(bool doLighting);
+	void setDrawWireframe(bool drawWireframe);
+	void setShowNormals(bool showNormals);
+
+	// Provided simple mesh creation
+	// TODO: provide more function for sphere and box
+	int pushPlaneRegularMesh(float size, int n);
+
+	// Camera
 	void setCameraEye(float x, float y, float z);
 	void setCameraAt(float x, float y, float z);
 	void setCameraPlanes(float near, float far);
