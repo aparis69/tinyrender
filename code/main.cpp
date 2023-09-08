@@ -17,71 +17,84 @@ static void LoadMesh(const char* path, tinyrender::object& obj) {
 	if (!ret)
 		return;
 
+	// Load the raw obj
+	obj.vertices.resize(attrib.vertices.size() / 3);
+	obj.normals.resize(attrib.vertices.size() / 3);
 	for (size_t s = 0; s < shapes.size(); s++) {
 		size_t index_offset = 0;
 		for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
 			int fv = shapes[s].mesh.num_face_vertices[f];
-			for (size_t v = 0; v < fv; v++)	{
-				// tinyobj index
+			for (size_t v = 0; v < fv; v++) {
 				tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
-
-				// Vertex
-				obj.vertices.push_back({
-						attrib.vertices[3 * idx.vertex_index + 0],
-						attrib.vertices[3 * idx.vertex_index + 1],
-						attrib.vertices[3 * idx.vertex_index + 2]
-					}
-				);
-
-				// Normals
-				obj.normals.push_back({
+				obj.vertices[idx.vertex_index] = 
+				{
+					attrib.vertices[3 * idx.vertex_index + 0],
+					attrib.vertices[3 * idx.vertex_index + 1],
+					attrib.vertices[3 * idx.vertex_index + 2]
+				};
+				if (idx.normal_index >= 0)
+				{
+					obj.normals[idx.vertex_index] = {
 						attrib.normals[3 * idx.normal_index + 0],
 						attrib.normals[3 * idx.normal_index + 1],
 						attrib.normals[3 * idx.normal_index + 2]
-					}
-				);
-				// Ignore UVs for now
+					};
+				}
+				obj.triangles.push_back(idx.vertex_index);
 			}
 			index_offset += fv;
 		}
 	}
 
-	// Vertex/Normals are now in order - so indices are easy
-	for (int i = 0; i < obj.vertices.size(); i += 3) {
-		obj.triangles.push_back(i);
-		obj.triangles.push_back(i + 1);
-		obj.triangles.push_back(i + 2);
+	// Make sure the loaded object has normals
+	bool hasNormals = attrib.normals.size() > 0;
+	if (!hasNormals)
+	{
+		for (int i = 0; i < obj.triangles.size(); i += 3)
+		{
+			const auto& v0 = obj.vertices[obj.triangles[i + 0]];
+			const auto& v1 = obj.vertices[obj.triangles[i + 1]];
+			const auto& v2 = obj.vertices[obj.triangles[i + 2]];
+			tinyrender::v3f n = tinyrender::internalCross((v1 - v0), (v2 - v0));
+			obj.normals[obj.triangles[i + 0]] += n;
+			obj.normals[obj.triangles[i + 1]] += n;
+			obj.normals[obj.triangles[i + 2]] += n;
+		}
+		for (int i = 0; i < obj.normals.size(); i++)
+			obj.normals[i] = tinyrender::internalNormalize(obj.normals[i]);
 	}
-}
-
-static float Uniform() {
-	return float(rand()) / float(RAND_MAX);
 }
 
 int main() {
 	tinyrender::init(800, 600);
 	tinyrender::setCameraAt(0.f, 0.f, 0.f);
 	tinyrender::setCameraEye(-10.f, 1.f, 0.f);
-	tinyrender::pushPlaneRegularMesh(10.0f, 256);
 	
 	tinyrender::object obj;
-	LoadMesh("../sphere.obj", obj);
+	LoadMesh("../resources/airboat.obj", obj);
 	obj.colors.resize(obj.vertices.size());
 	for (auto& col : obj.colors) {
-		col = { Uniform(), Uniform(), Uniform() };
+		col = { .6f, .6f, .6f };
 	}
 	int id = tinyrender::pushObject(obj);
 
 	while (!tinyrender::shouldQuit())
 	{
-		// Test: dynamic update of colors
-		//for (auto& col : obj.colors) {
-		//	col = { Uniform(), Uniform(), Uniform() };
-		//}
-		//tinyrender::updateObjectColors(id, obj.colors);
-
 		tinyrender::update();
 		tinyrender::render();
+
+		ImGui::Begin("Scene settings");
+		static bool doLighting = true;
+		if (ImGui::Checkbox("Lighting", &doLighting))
+			tinyrender::setDoLighting(doLighting);
+		static bool drawWireframe = true;
+		if (ImGui::Checkbox("Wireframe", &drawWireframe))
+			tinyrender::setDrawWireframe(drawWireframe);
+		static bool showNormals = false;
+		if (ImGui::Checkbox("Show Normals", &showNormals))
+			tinyrender::setShowNormals(showNormals);
+		ImGui::End();
+
 		tinyrender::swap();
 	}
 

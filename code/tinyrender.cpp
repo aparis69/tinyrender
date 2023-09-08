@@ -23,20 +23,28 @@ namespace tinyrender
 	struct scene_internal
 	{
 	public:
+		// Camera settings
 		float zNear = 0.1f, zFar = 500.0f;
 		v3f eye = { 10, 0, 0 };
 		v3f at = { 0 };
 		v3f up = { 0, 1, 0 };
 		float camSpeed = 0.01f;
-		v3f lightDir = { 1, 1, 0 };
 
-		float deltaTime = 0.0f;
-		float lastFrame = 0.0f;
-
+		// Movement settings
 		float mouseScrollingSpeed = 2.0f;
 		float mouseSensitivity = 0.1f;
 		float mouseLastX = 0.0f;
 		float mouseLastY = 0.0f;
+
+		// Frame timers
+		float deltaTime = 0.0f;
+		float lastFrame = 0.0f;
+
+		// Render flags
+		v3f lightDir = { 1, 1, 0 };
+		bool doLighting = true;
+		bool showNormals = false;
+		bool drawWireframe = true;
 	};
 
 	static GLFWwindow* windowPtr;
@@ -388,41 +396,104 @@ namespace tinyrender
 			"uniform mat4 u_projection;\n"
 			"uniform mat4 u_view;\n"
 			"uniform mat4 u_model;\n"
+			"out vec3 geomPos;\n"
+			"out vec3 geomNormal;\n"
+			"out vec3 geomColor;\n"
+			"void main()\n"
+			"{\n"
+			"	 geomPos = vertex;\n"
+			"    gl_Position = u_projection * u_view * u_model * vec4(vertex, 1.0f);\n"
+			"	 geomNormal = normalize(normal);\n"
+			"    geomColor = color;\n"
+			"}\n";
+		const GLchar* geometryShaderSource =
+			"#version 330\n"
+			"layout(triangles) in;\n"
+			"layout(triangle_strip, max_vertices = 3) out;\n"
+			"in vec3 geomPos[];\n"
+			"in vec3 geomNormal[];\n"
+			"in vec3 geomColor[];\n"
+			"uniform vec2 WIN_SCALE;\n"
 			"out vec3 fragPos;\n"
 			"out vec3 fragNormal;\n"
 			"out vec3 fragColor;\n"
+			"out vec3 dist;\n"
 			"void main()\n"
 			"{\n"
-			"	 fragPos = vertex;\n"
-			"    gl_Position = u_projection * u_view * u_model * vec4(vertex, 1.0f);\n"
-			"	 fragNormal = normalize(normal);\n"
-			"    fragColor = color;\n"
+			"	vec2 p0 = WIN_SCALE * gl_in[0].gl_Position.xy / gl_in[0].gl_Position.w;\n"
+			"	vec2 p1 = WIN_SCALE * gl_in[1].gl_Position.xy / gl_in[1].gl_Position.w;\n"
+			"	vec2 p2 = WIN_SCALE * gl_in[2].gl_Position.xy / gl_in[2].gl_Position.w;\n"
+			"	vec2 v0 = p2 - p1;\n"
+			"	vec2 v1 = p2 - p0;;\n"
+			"	vec2 v2 = p1 - p0;;\n"
+			"	float area = abs(v1.x*v2.y - v1.y * v2.x);\n"
+			"	dist = vec3(area / length(v0), 0, 0);\n"
+			"	gl_Position = gl_in[0].gl_Position;\n"
+			"	fragPos = geomPos[0]; fragColor = geomColor[0];  fragNormal = geomNormal[0];\n"
+			"	EmitVertex();\n"
+			"	dist = vec3(0, area / length(v1), 0);\n"
+			"	gl_Position = gl_in[1].gl_Position;\n"
+			"	fragPos = geomPos[1]; fragColor = geomColor[1];  fragNormal = geomNormal[1];\n"
+			"	EmitVertex();\n"
+			"	dist = vec3(0, 0, area / length(v2));\n"
+			"	gl_Position = gl_in[2].gl_Position;\n"
+			"	fragPos = geomPos[2]; fragColor = geomColor[2];  fragNormal = geomNormal[2];\n"
+			"	EmitVertex();\n"
+			"	EndPrimitive();\n"
 			"}\n";
 		const GLchar* fragmentShaderSource =
 			"#version 330\n"
 			"in vec3 fragPos;\n"
 			"in vec3 fragNormal;\n"
 			"in vec3 fragColor;\n"
+			"in vec3 dist;\n"
 			"uniform vec3 u_light_dir;\n"
+			"uniform int doLighting;\n"
+			"uniform int drawWireframe;\n"
+			"uniform int showNormals;\n"
 			"out vec4 outFragmentColor;\n"
 			"void main()\n"
 			"{\n"
-			"	 float d = 0.5 * (1.0 + dot(fragNormal, u_light_dir));"
-			"	 outFragmentColor = vec4(fragColor * d, 1.0); \n"
+			"	 float d = doLighting == 1 ? 0.5 * (1.0 + dot(fragNormal, u_light_dir)) : 1.0f;\n"
+			"	 vec3 col = fragColor;\n"
+			"	 if (showNormals == 1) col = fragNormal;\n"
+			"	 float w = min(dist[0], min(dist[1], dist[2]));\n"
+			"	 float I = exp2(-1 * w * w);\n"
+			"	 if (drawWireframe == 1)\n"
+			"		col = I * vec3(0.1) + (1.0 - I) * col;\n"
+			"	 outFragmentColor = vec4(col * d, 1.0); \n"
 			"}\n";
-		GLuint g_ShaderHandle = 0, g_VertHandle = 0, g_FragHandle = 0;
+		GLuint g_ShaderHandle = 0, g_VertHandle = 0, g_FragHandle = 0, g_GeomHandle = 0;
 		g_VertHandle = glCreateShader(GL_VERTEX_SHADER);
 		glShaderSource(g_VertHandle, 1, &vertexShaderSource, NULL);
 		glCompileShader(g_VertHandle);
-		_internalCheckShader(g_VertHandle, "vertex shader");
+		if (!_internalCheckShader(g_VertHandle, "vertex shader"))
+		{
+			fprintf(stderr, "Error initializing vertex shader");
+			return;
+		}
+
+		g_GeomHandle = glCreateShader(GL_GEOMETRY_SHADER);
+		glShaderSource(g_GeomHandle, 1, &geometryShaderSource, NULL);
+		glCompileShader(g_GeomHandle);
+		if (!_internalCheckShader(g_GeomHandle, "geometry shader"))
+		{
+			fprintf(stderr, "Error initializing geometry shader");
+			return;
+		}
 
 		g_FragHandle = glCreateShader(GL_FRAGMENT_SHADER);
 		glShaderSource(g_FragHandle, 1, &fragmentShaderSource, NULL);
 		glCompileShader(g_FragHandle);
-		_internalCheckShader(g_FragHandle, "fragment shader");
+		if (!_internalCheckShader(g_FragHandle, "fragment shader"))
+		{
+			fprintf(stderr, "Error initializing fragment shader");
+			return;
+		}
 
 		g_ShaderHandle = glCreateProgram();
 		glAttachShader(g_ShaderHandle, g_VertHandle);
+		glAttachShader(g_ShaderHandle, g_GeomHandle);
 		glAttachShader(g_ShaderHandle, g_FragHandle);
 		glLinkProgram(g_ShaderHandle);
 		internalShaders.push_back(g_ShaderHandle);
@@ -564,6 +635,10 @@ namespace tinyrender
 			glUniformMatrix4fv(glGetUniformLocation(shaderID, "u_view"), 1, GL_FALSE, &viewMatrix[0][0]);
 			glUniformMatrix4fv(glGetUniformLocation(shaderID, "u_model"), 1, GL_FALSE, &it.modelMatrix[0][0]);
 			glUniform3f(glGetUniformLocation(shaderID, "u_light_dir"), 1, GL_FALSE, internalScene.lightDir[0]);
+			glUniform1i(glGetUniformLocation(shaderID, "doLighting"), int(internalScene.doLighting));
+			glUniform1i(glGetUniformLocation(shaderID, "drawWireframe"), int(internalScene.drawWireframe));
+			glUniform1i(glGetUniformLocation(shaderID, "showNormals"), int(internalScene.showNormals));
+			glUniform2f(glGetUniformLocation(shaderID, "WIN_SCALE"), float(width_internal) / 2.0f, float(height_internal) / 2.0f);
 
 			glBindVertexArray(it.vao);
 			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
@@ -685,7 +760,33 @@ namespace tinyrender
 		}
 	}
 
-	
+	/*!
+	\brief Set the lighting flag (ie. should diffuse light be computed or not)
+	\param doLighting
+	*/
+	void setDoLighting(bool doLighting)
+	{
+		internalScene.doLighting = doLighting;
+	}
+
+	/*!
+	\brief Draw the wireframe of all the objects or not.
+	\param drawWireframe
+	*/
+	void setDrawWireframe(bool drawWireframe)
+	{
+		internalScene.drawWireframe = drawWireframe;
+	}
+
+	/*!
+	\brief Override the current rendering state and show the normals of all objects.
+	\param showNormals
+	*/
+	void setShowNormals(bool showNormals)
+	{
+		internalScene.showNormals = showNormals;
+	}
+
 	/*!
 	\brief
 	*/

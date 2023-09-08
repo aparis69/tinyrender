@@ -110,7 +110,13 @@ namespace tinyrender
 	void popObject(int id);
 	void popFirst();
 
+	// Parameters
+	void setDoLighting(bool doLighting);
+	void setDrawWireframe(bool drawWireframe);
+	void setShowNormals(bool showNormals);
+
 	// Provided simple mesh creation
+	// TODO: provide more function for sphere and box
 	int pushPlaneRegularMesh(float size, int n);
 
 	// Camera
