@@ -57,7 +57,7 @@ namespace tinyrender
 	}
 	inline v3f operator-(const v3f& l, const v3f r)
 	{
-		return v3f({ l.x - r.x, l.y - r.y, l.z - r.z });
+		return { l.x - r.x, l.y - r.y, l.z - r.z };
 	}
 	inline v3f operator+(const v3f& l, const v3f& r)
 	{
@@ -65,17 +65,17 @@ namespace tinyrender
 	}
 	inline v3f operator*(const v3f& l, float x)
 	{
-		return v3f({ l.x * x, l.y * x, l.z * x });
+		return { l.x * x, l.y * x, l.z * x };
 	}
 	inline v3f operator/(const v3f& l, float x)
 	{
-		return v3f({ l.x / x, l.y / x, l.z / x });
+		return { l.x / x, l.y / x, l.z / x };
 	}
 	inline v3f operator-(const v3f& l)
 	{
-		return v3f({ -l.x, -l.y, -l.z });
+		return { -l.x, -l.y, -l.z };
 	}
-	inline float radian(float degrees)
+	inline float toRadian(float degrees)
 	{
 		return degrees * static_cast<float>(0.01745329251994329576923690768489);
 	}
@@ -92,7 +92,9 @@ namespace tinyrender
 		std::vector<v3f> colors;
 		std::vector<int> triangles;
 	};
-	void init(int width, int height);
+
+	// Window
+	void init(const char* windowName = "tinyrender", int width = -1, int height = -1);
 	bool shouldQuit();
 	bool getKey(int key);
 	float deltaTime();
@@ -103,27 +105,24 @@ namespace tinyrender
 	void terminate();
 
 	// 3D objects
-	int pushObject(const object& obj);
+	int addObject(const object& obj);
+	bool removeObject(int id);
 	void updateObject(int id, const object& obj);
 	void updateObject(int id, const v3f& position, const v3f& scale);
 	void updateObjectColors(int id, const std::vector<v3f>& newColors);
-	void popObject(int id);
-	void popFirst();
 
 	// Parameters
 	void setDoLighting(bool doLighting);
 	void setDrawWireframe(bool drawWireframe);
 	void setShowNormals(bool showNormals);
-
-	// Provided simple mesh creation
-	// TODO: provide more function for sphere and box
-	int pushPlaneRegularMesh(float size, int n);
-
-	// Camera
 	void setCameraEye(float x, float y, float z);
 	void setCameraAt(float x, float y, float z);
 	void setCameraPlanes(float near, float far);
 	void setLightDir(float x, float y, float z);
+
+	// Simple mesh creation API
+	// TODO: provide more function for sphere and box
+	int pushPlaneRegularMesh(float size, int n);
 }
 
 #endif

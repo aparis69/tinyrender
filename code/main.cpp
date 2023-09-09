@@ -24,7 +24,7 @@ static void LoadMesh(const char* path, tinyrender::object& obj) {
 		size_t index_offset = 0;
 		for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
 			int fv = shapes[s].mesh.num_face_vertices[f];
-			for (size_t v = 0; v < fv; v++) {
+			for (int v = 0; v < fv; v++) {
 				tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
 				obj.vertices[idx.vertex_index] = 
 				{
@@ -66,7 +66,7 @@ static void LoadMesh(const char* path, tinyrender::object& obj) {
 }
 
 int main() {
-	tinyrender::init(800, 600);
+	tinyrender::init("tinyrender", 1280, 720);
 	tinyrender::setCameraAt(0.f, 0.f, 0.f);
 	tinyrender::setCameraEye(-10.f, 1.f, 0.f);
 	
@@ -76,25 +76,12 @@ int main() {
 	for (auto& col : obj.colors) {
 		col = { .6f, .6f, .6f };
 	}
-	int id = tinyrender::pushObject(obj);
+	int id = tinyrender::addObject(obj);
 
 	while (!tinyrender::shouldQuit())
 	{
 		tinyrender::update();
 		tinyrender::render();
-
-		ImGui::Begin("Scene settings");
-		static bool doLighting = true;
-		if (ImGui::Checkbox("Lighting", &doLighting))
-			tinyrender::setDoLighting(doLighting);
-		static bool drawWireframe = true;
-		if (ImGui::Checkbox("Wireframe", &drawWireframe))
-			tinyrender::setDrawWireframe(drawWireframe);
-		static bool showNormals = false;
-		if (ImGui::Checkbox("Show Normals", &showNormals))
-			tinyrender::setShowNormals(showNormals);
-		ImGui::End();
-
 		tinyrender::swap();
 	}
 

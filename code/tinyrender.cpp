@@ -1,7 +1,7 @@
 #include "tinyrender.h"
 
-#include <assert.h>			// assert
-#include <stdio.h>      // sscanf, fprintf
+#include <assert.h>		// assert
+#include <stdio.h>      // fprintf
 
 #include "../dependency/imgui/backends/imgui_impl_glfw.h"
 #include "../dependency/imgui/backends/imgui_impl_opengl3.h"
@@ -35,6 +35,7 @@ namespace tinyrender
 		float mouseSensitivity = 0.1f;
 		float mouseLastX = 0.0f;
 		float mouseLastY = 0.0f;
+		bool isMouseOverGui = false;
 
 		// Frame timers
 		float deltaTime = 0.0f;
@@ -55,7 +56,7 @@ namespace tinyrender
 
 
 	/*!
-	\brief Initialize a matrix to identity.
+	\brief Initialize a 4x4 matrix to identity.
 	\param Result matrix to initialize
 	*/
 	static void _internalIdentity(float Result[4][4])
@@ -102,7 +103,7 @@ namespace tinyrender
 	*/
 	static void _internalCameraPerspective(float Result[4][4])
 	{
-		float const tanHalfFovy = tan(radian(45.0f) / 2.0f);
+		float const tanHalfFovy = tan(toRadian(45.0f) / 2.0f);
 		float const zNear = internalScene.zNear;
 		float const zFar = internalScene.zFar;
 
@@ -115,6 +116,7 @@ namespace tinyrender
 
 	/*
 	\brief Apply a translation to the camera, in camera space.
+	Also deals with camera panning in screen space.
 	\param x translation X
 	\param y translation Y
 	\param z translation Z
@@ -146,8 +148,9 @@ namespace tinyrender
 		}
 		if (z != 0.0f)
 		{
-			v3f f = internalNormalize(internalScene.at - internalScene.eye);
-			internalScene.eye += f * z;
+			v3f f = internalScene.at - internalScene.eye;
+			float moveScale = internalLength(f) * 0.025f;
+			internalScene.eye += (internalNormalize(f) * z) * moveScale;
 		}
 		if (xPlane != 0.0f)
 		{
@@ -167,8 +170,7 @@ namespace tinyrender
 	}
 
 	/*
-	\brief Compute the model matrices for a given position and scale. Rotation
-	is not yet supported.
+	\brief Compute the model matrices for a given position and scale. Rotation is not yet supported.
 	\param Result the resulting model matrix
 	\param p translation
 	\param s scale
@@ -215,8 +217,8 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Create the internal description of an object. Initialize opengl buffers.
-	\param obj high level descriptor of the object.
+	\brief Create the internal representation of an object. Initialize opengl buffers.
+	\param obj high level object with mesh and color data.
 	*/
 	static object_internal _internalCreateObject(const object& obj)
 	{
@@ -234,8 +236,8 @@ namespace tinyrender
 		glGenBuffers(1, &ret.buffers);
 		glBindBuffer(GL_ARRAY_BUFFER, ret.buffers);
 		glBufferData(GL_ARRAY_BUFFER, fullSize, nullptr, GL_STATIC_DRAW);
-		int size = 0;
-		int offset = 0;
+		size_t size = 0;
+		size_t offset = 0;
 		size = sizeof(v3f) * obj.vertices.size();
 		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.vertices.front());
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
@@ -308,14 +310,14 @@ namespace tinyrender
 	}
 
 	/*
-	\brief Removes an object from the internal hierarchy.
+	\brief Deletes an object from the internal hierarchy. Destroys the opengl buffers.
 	\param id object index
 	*/
-	static void _internalDeleteObject(int id)
+	static bool _internalDeleteObject(int id)
 	{
 		object_internal& obj = internalObjects[id];
 		if (obj.isDeleted)
-			return;
+			return false;
 
 		glDeleteBuffers(1, &obj.buffers);
 		glDeleteBuffers(1, &obj.triangleBuffer);
@@ -324,10 +326,12 @@ namespace tinyrender
 		// obj is not actually removed from the internal vector, but flagged as deleted.
 		// This is to ensure indices of existing object will not change.
 		obj.isDeleted = true;
+
+		return true;
 	}
 
 	/*
-	\brief
+	\brief Returns the next free index in the internal object array.
 	*/
 	static int _internalGetNextFreeIndex()
 	{
@@ -336,32 +340,46 @@ namespace tinyrender
 			if (internalObjects[i].isDeleted)
 				return i;
 		}
-		return internalObjects.size();
+		return int(internalObjects.size());
 	}
 
 
 	/*!
-	\brief Init a window sized (width, height).
+	\brief Init a window sized (width, height) with a given name.
+	\param windowName name of the window on top bar
+	\param width, height window dimensions. If either is -1, then the window will 
+	maximized at startup with screen resolution.
 	*/
-	void init(int width, int height)
+	void init(const char* windowName, int width, int height)
 	{
 		// Window
 		// -------------------------------------------------------------------------------
+		glfwInit();
+		if (width == -1 || height == -1)
+		{
+			const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+			width = mode->width;
+			height = mode->height;
+		}
 		width_internal = width;
 		height_internal = height;
-		glfwInit();
+		
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+		glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 		glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-		windowPtr = glfwCreateWindow(width, height, "tinyrender", NULL, NULL);
+		glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+		windowPtr = glfwCreateWindow(width, height, windowName, NULL, NULL);
 		if (windowPtr == NULL)
 		{
-			fprintf(stderr, "Error creating window");
+			fprintf(stderr, "Error creating GLFW window - terminating");
 			glfwTerminate();
 			return;
 		}
 		glfwMakeContextCurrent(windowPtr);
+		glfwShowWindow(windowPtr);
 		glfwSwapInterval(1);
 		glfwSetInputMode(windowPtr, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 		glfwSetWindowSizeCallback(windowPtr, [](GLFWwindow* win, int w, int h)
@@ -372,7 +390,7 @@ namespace tinyrender
 		});
 		glfwSetScrollCallback(windowPtr, [](GLFWwindow* win, double x, double y)
 		{
-			_internalCameraMove(0.0f, 0.0f, y * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
+			_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
 		});
 
 		// OpenGL
@@ -382,7 +400,7 @@ namespace tinyrender
 		GLenum err = glGetError();
 		if (err != GL_NO_ERROR)
 		{
-			fprintf(stderr, "Error initializing opengl");
+			fprintf(stderr, "Error initializing opengl - terminating");
 			glfwTerminate();
 			return;
 		}
@@ -457,7 +475,10 @@ namespace tinyrender
 			"{\n"
 			"	 float d = doLighting == 1 ? 0.5 * (1.0 + dot(fragNormal, u_light_dir)) : 1.0f;\n"
 			"	 vec3 col = fragColor;\n"
-			"	 if (showNormals == 1) col = fragNormal;\n"
+			"	 if (showNormals == 1) {\n"
+			"		col = vec3(0.2*(vec3(3.0,3.0,3.0)+2.0*fragNormal));\n"
+			"		d = 1.f\n;"	
+			"	 }\n"
 			"	 float w = min(dist[0], min(dist[1], dist[2]));\n"
 			"	 float I = exp2(-1 * w * w);\n"
 			"	 if (drawWireframe == 1)\n"
@@ -470,7 +491,7 @@ namespace tinyrender
 		glCompileShader(g_VertHandle);
 		if (!_internalCheckShader(g_VertHandle, "vertex shader"))
 		{
-			fprintf(stderr, "Error initializing vertex shader");
+			fprintf(stderr, "Error initializing vertex shader - terminating");
 			return;
 		}
 
@@ -479,7 +500,7 @@ namespace tinyrender
 		glCompileShader(g_GeomHandle);
 		if (!_internalCheckShader(g_GeomHandle, "geometry shader"))
 		{
-			fprintf(stderr, "Error initializing geometry shader");
+			fprintf(stderr, "Error initializing geometry shader - terminating");
 			return;
 		}
 
@@ -488,7 +509,7 @@ namespace tinyrender
 		glCompileShader(g_FragHandle);
 		if (!_internalCheckShader(g_FragHandle, "fragment shader"))
 		{
-			fprintf(stderr, "Error initializing fragment shader");
+			fprintf(stderr, "Error initializing fragment shader - terminating");
 			return;
 		}
 
@@ -499,9 +520,6 @@ namespace tinyrender
 		glLinkProgram(g_ShaderHandle);
 		internalShaders.push_back(g_ShaderHandle);
 
-		// Reserve some space for future object
-		internalObjects.reserve(100);
-
 		// Imgui
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();
@@ -510,8 +528,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Returns true of the user closed the window, or pressed escape.
-	Returns false otherwise.
+	\brief Returns true of the user closed the window or pressed escape, and false otherwise.
 	*/
 	bool shouldQuit()
 	{
@@ -528,7 +545,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief
+	\brief Returns the current delta time between two frames.
 	*/
 	float deltaTime()
 	{
@@ -536,7 +553,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief
+	\brief Returns the elapsed time since window initialiazation.
 	*/
 	float globalTime()
 	{
@@ -544,8 +561,7 @@ namespace tinyrender
 	}
 
 	/*
-	\brief Update function. Applies internal orbiter camera translation
-	and rotation.
+	\brief Update function. Applies camera movements.
 	*/
 	void update()
 	{
@@ -572,7 +588,7 @@ namespace tinyrender
 		double xpos, ypos;
 		glfwGetCursorPos(windowPtr, &xpos, &ypos);
 		int state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_LEFT);
-		if (state == GLFW_PRESS)
+		if (state == GLFW_PRESS && !internalScene.isMouseOverGui)
 		{
 			float xoffset = float(xpos) - internalScene.mouseLastX;
 
@@ -582,7 +598,7 @@ namespace tinyrender
 			y += (yoffset * internalScene.mouseSensitivity);
 		}
 		state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_MIDDLE);
-		if (state == GLFW_PRESS)
+		if (state == GLFW_PRESS && !internalScene.isMouseOverGui)
 		{
 			float xoffset = float(xpos) - internalScene.mouseLastX;
 			float yoffset = float(ypos) - internalScene.mouseLastY;
@@ -622,6 +638,7 @@ namespace tinyrender
 		_internalCameraPerspective(projectionMatrix);
 
 		// Render all objects
+		v3f normalizedLight = internalNormalize(internalScene.lightDir);
 		for (int i = 0; i < internalObjects.size(); i++)
 		{
 			object_internal& it = internalObjects[i];
@@ -635,7 +652,7 @@ namespace tinyrender
 			glUniformMatrix4fv(glGetUniformLocation(shaderID, "u_projection"), 1, GL_FALSE, &projectionMatrix[0][0]);
 			glUniformMatrix4fv(glGetUniformLocation(shaderID, "u_view"), 1, GL_FALSE, &viewMatrix[0][0]);
 			glUniformMatrix4fv(glGetUniformLocation(shaderID, "u_model"), 1, GL_FALSE, &it.modelMatrix[0][0]);
-			glUniform3f(glGetUniformLocation(shaderID, "u_light_dir"), 1, GL_FALSE, internalScene.lightDir[0]);
+			glUniform3f(glGetUniformLocation(shaderID, "u_light_dir"), normalizedLight[0], normalizedLight[1], normalizedLight[2]);
 			glUniform1i(glGetUniformLocation(shaderID, "doLighting"), int(internalScene.doLighting));
 			glUniform1i(glGetUniformLocation(shaderID, "drawWireframe"), int(internalScene.drawWireframe));
 			glUniform1i(glGetUniformLocation(shaderID, "showNormals"), int(internalScene.showNormals));
@@ -649,10 +666,28 @@ namespace tinyrender
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
+
+		// Internal imgui
+		{
+			ImGui::Begin("Rendering");
+			internalScene.isMouseOverGui = ImGui::IsWindowHovered() || ImGui::IsAnyItemHovered();
+			if (ImGui::Checkbox("Lighting", &internalScene.doLighting))
+				tinyrender::setDoLighting(internalScene.doLighting);
+			if (ImGui::Checkbox("Wireframe", &internalScene.drawWireframe))
+				tinyrender::setDrawWireframe(internalScene.drawWireframe);
+			if (ImGui::Checkbox("Show Normals", &internalScene.showNormals))
+				tinyrender::setShowNormals(internalScene.showNormals);
+			ImGui::Text("Light direction");
+			ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
+			ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
+			ImGui::DragFloat("z", &internalScene.lightDir.z, 0.1f, -1.0f, 1.0f);
+			ImGui::End();
+		}
 	}
 
 	/*!
-	\brief TODO
+	\brief End the current frame. Must be called after update, render, and
+	custom dear imgui calls.
 	*/
 	void swap()
 	{
@@ -677,12 +712,11 @@ namespace tinyrender
 
 
 	/*!
-	\brief Add an object to the internal hierarchy. Rendering
-	buffers are allocated here.
+	\brief Add an object to the internal hierarchy. Rendering buffers are allocated here.
 	\param object new object
 	\returns the id of the object in the hierarchy.
 	*/
-	int pushObject(const object& obj)
+	int addObject(const object& obj)
 	{
 		object_internal internalObject = _internalCreateObject(obj);
 		int index = _internalGetNextFreeIndex();
@@ -694,11 +728,20 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Update an object with new data, given its id.
-	Note that the internal object (with id as an identifier) should
-	already be initialized.
-	The update can also only be performed with data of same size; it will
-	fail if you change the internal array sizes.
+	\brief Removes an object from the internal hierarchy, given its id.
+	\param id identifier
+	\returns true of removal is successfull false otherwise.
+	*/
+	bool removeObject(int id)
+	{
+		assert(id < internalObjects.size());
+		return _internalDeleteObject(id);
+	}
+
+	/*!
+	\brief Update an object with new data, given its id. Note that the internal object (with id as an identifier) should
+	already be initialized.	The update must also only be be with data of same size; it will fail if you change the 
+	internal array sizes.
 	\param id identifier
 	\param obj new object data
 	\returns true of update is successfull, false otherwise.
@@ -710,8 +753,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Update an object with a new model matrix, given its id.
-	The internal object whould already be initialized.
+	\brief Update an object with a new position and scale, given its id. The internal object whould already be initialized.
 	\param id identifier
 	\param pos new position
 	\param scale new scale
@@ -724,7 +766,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Update an object' colors given its id. 
+	\brief Update an object colors given its id. 
 	\param id object id
 	\param newColors new per-vertex color array.
 	*/
@@ -735,31 +777,6 @@ namespace tinyrender
 		_internalUpdateObject(id, newColors);
 	}
 
-	/*!
-	\brief Removes an object from the internal hierarchy, given its id.
-	\param id identifier
-	\returns true of removal is successfull false otherwise.
-	*/
-	void popObject(int id)
-	{
-		assert(id < internalObjects.size());
-		_internalDeleteObject(id);
-	}
-
-	/*
-	\brief
-	*/
-	void popFirst()
-	{
-		for (int i = 0; i < internalObjects.size(); i++)
-		{
-			if (internalObjects[i].isDeleted == false)
-			{
-				popObject(i);
-				return;
-			}
-		}
-	}
 
 	/*!
 	\brief Set the lighting flag (ie. should diffuse light be computed or not)
@@ -832,7 +849,7 @@ namespace tinyrender
 			}
 		}
 
-		return pushObject(planeObject);
+		return addObject(planeObject);
 	}
 
 
@@ -851,9 +868,7 @@ namespace tinyrender
 
 	/*!
 	\brief Set the camera look-at point.
-	\param x
-	\param y
-	\param z
+	\param x, y, z new look at position
 	*/
 	void setCameraAt(float x, float y, float z)
 	{
@@ -875,9 +890,7 @@ namespace tinyrender
 
 	/*!
 	\brief Set the light position.
-	\param x
-	\param y
-	\param z
+	\param x, y, z new light position
 	*/
 	void setLightDir(float x, float y, float z)
 	{
