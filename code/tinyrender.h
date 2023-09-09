@@ -120,9 +120,10 @@ namespace tinyrender
 	void setCameraPlanes(float near, float far);
 	void setLightDir(float x, float y, float z);
 
-	// Simple mesh creation API
+	// Simple mesh API
 	// TODO: provide more function for sphere and box
 	int pushPlaneRegularMesh(float size, int n);
+	bool exportObjFile(const char* filename, const object& object);
 }
 
 #endif

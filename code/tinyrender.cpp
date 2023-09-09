@@ -2,6 +2,7 @@
 
 #include <assert.h>		// assert
 #include <stdio.h>      // fprintf
+#include <fstream>		// ostream, endl
 
 #include "../dependency/imgui/backends/imgui_impl_glfw.h"
 #include "../dependency/imgui/backends/imgui_impl_opengl3.h"
@@ -254,6 +255,10 @@ namespace tinyrender
 			glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.colors.front());
 			glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
 			glEnableVertexAttribArray(2);
+		}
+		else
+		{
+			fprintf(stdout, "Warning: object does not have any colors");
 		}
 		glGenBuffers(1, &ret.triangleBuffer);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ret.triangleBuffer);
@@ -681,6 +686,10 @@ namespace tinyrender
 			ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
 			ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
 			ImGui::DragFloat("z", &internalScene.lightDir.z, 0.1f, -1.0f, 1.0f);
+			
+			ImGui::Separator();
+			ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / float(ImGui::GetIO().Framerate), float(ImGui::GetIO().Framerate));
+
 			ImGui::End();
 		}
 	}
@@ -806,54 +815,6 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief
-	*/
-	int pushPlaneRegularMesh(float size, int n)
-	{
-		v3f a({ -size, 0.0f, -size });
-		v3f b({ size, 0.0f, size });
-		v3f step = (b - a) / float(n - 1);
-		object planeObject;
-		
-		// Vertices
-		for (int i = 0; i < n; i++)
-		{
-			for (int j = 0; j < n; j++)
-			{
-				v3f v = a + v3f({ step.x * i, 0.f, step.z * j });
-				planeObject.vertices.push_back(v);
-				planeObject.normals.push_back({ 0.f, 1.f, 0.f });
-				planeObject.colors.push_back({ 0.7f, 0.7f, 0.7f });
-			}
-		}
-
-		// Triangles
-		for (int i = 0; i < n - 1; i++)
-		{
-			for (int j = 0; j < n - 1; j++)
-			{
-				int v0 = (j * n) + i;
-				int v1 = (j * n) + i + 1;
-				int v2 = ((j + 1) * n) + i;
-				int v3 = ((j + 1) * n) + i + 1;
-
-				// tri 0
-				planeObject.triangles.push_back(v0);
-				planeObject.triangles.push_back(v1);
-				planeObject.triangles.push_back(v2);
-
-				// tri 1
-				planeObject.triangles.push_back(v2);
-				planeObject.triangles.push_back(v1);
-				planeObject.triangles.push_back(v3);
-			}
-		}
-
-		return addObject(planeObject);
-	}
-
-
-	/*!
 	\brief Set the camera eye position.
 	\param x
 	\param y
@@ -897,5 +858,85 @@ namespace tinyrender
 		internalScene.lightDir.x = x;
 		internalScene.lightDir.y = y;
 		internalScene.lightDir.z = z;
+	}
+
+
+	/*!
+	\brief Creates a subdivided plane object.
+	\param size world space size
+	\param n subdivision
+	*/
+	int pushPlaneRegularMesh(float size, int n)
+	{
+		v3f a({ -size, 0.0f, -size });
+		v3f b({ size, 0.0f, size });
+		v3f step = (b - a) / float(n - 1);
+		object planeObject;
+
+		// Vertices
+		for (int i = 0; i < n; i++)
+		{
+			for (int j = 0; j < n; j++)
+			{
+				v3f v = a + v3f({ step.x * i, 0.f, step.z * j });
+				planeObject.vertices.push_back(v);
+				planeObject.normals.push_back({ 0.f, 1.f, 0.f });
+				planeObject.colors.push_back({ 0.7f, 0.7f, 0.7f });
+			}
+		}
+
+		// Triangles
+		for (int i = 0; i < n - 1; i++)
+		{
+			for (int j = 0; j < n - 1; j++)
+			{
+				int v0 = (j * n) + i;
+				int v1 = (j * n) + i + 1;
+				int v2 = ((j + 1) * n) + i;
+				int v3 = ((j + 1) * n) + i + 1;
+
+				// tri 0
+				planeObject.triangles.push_back(v0);
+				planeObject.triangles.push_back(v1);
+				planeObject.triangles.push_back(v2);
+
+				// tri 1
+				planeObject.triangles.push_back(v2);
+				planeObject.triangles.push_back(v1);
+				planeObject.triangles.push_back(v3);
+			}
+		}
+
+		return addObject(planeObject);
+	}
+
+	/*!
+	\brief Exports a given object as a .obj mesh file.
+	\param filename filename to export
+	\param object the object, which should be filled with contents (ie. vertices, triangles...)
+	*/
+	bool exportObjFile(const char* filename, const object& object)
+	{
+		std::ofstream out;
+		out.open(filename);
+		if (out.is_open() == false)
+		{
+			fprintf(stderr, "Could not open file for saving obj - terminating");
+			return false;
+		}
+		out << "g " << "Obj" << std::endl;
+		for (int i = 0; i < object.vertices.size(); i++)
+			out << "v " << object.vertices.at(i).x << " " << object.vertices.at(i).y << " " << object.vertices.at(i).z << '\n';
+		for (int i = 0; i < object.normals.size(); i++)
+			out << "vn " << object.normals.at(i).x << " " << object.normals.at(i).z << " " << object.normals.at(i).y << '\n';
+		for (int i = 0; i < object.triangles.size(); i += 3)
+		{
+			out << "f " << object.triangles.at(i) + 1 << "//" << object.triangles.at(i) + 1
+				<< " " << object.triangles.at(i + 1) + 1 << "//" << object.triangles.at(i + 1) + 1
+				<< " " << object.triangles.at(i + 2) + 1 << "//" << object.triangles.at(i + 2) + 1
+				<< '\n';
+		}
+		out.close();
+		return true;
 	}
 }

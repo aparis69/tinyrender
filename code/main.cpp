@@ -2,7 +2,6 @@
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "../dependency/tinyobj/tiny_obj_loader.h"
-#include <iostream>
 
 static void LoadMesh(const char* path, tinyrender::object& obj) {
 	tinyobj::attrib_t attrib;
@@ -10,11 +9,7 @@ static void LoadMesh(const char* path, tinyrender::object& obj) {
 	std::vector<tinyobj::material_t> materials;
 	std::string warn, err;
 	bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path);
-	if (!warn.empty())
-		std::cout << warn << std::endl;
-	if (!err.empty())
-		std::cout << err << std::endl;
-	if (!ret)
+	if (!err.empty() || !ret)
 		return;
 
 	// Load the raw obj
@@ -77,14 +72,12 @@ int main() {
 		col = { .6f, .6f, .6f };
 	}
 	int id = tinyrender::addObject(obj);
-
 	while (!tinyrender::shouldQuit())
 	{
 		tinyrender::update();
 		tinyrender::render();
 		tinyrender::swap();
 	}
-
 	tinyrender::terminate();
 	return 0;
 }
