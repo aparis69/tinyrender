@@ -3,6 +3,7 @@
 #include <assert.h>		// assert
 #include <stdio.h>      // fprintf
 #include <fstream>		// ostream, endl
+#include <string>		// std::to_string
 
 #include "../dependency/imgui/backends/imgui_impl_glfw.h"
 #include "../dependency/imgui/backends/imgui_impl_opengl3.h"
@@ -17,7 +18,6 @@ namespace tinyrender
 		GLuint triangleBuffer = 0;
 		float modelMatrix[4][4] = { 0 };
 		int triangleCount = 0;
-
 		bool isDeleted = false;
 	};
 
@@ -31,12 +31,13 @@ namespace tinyrender
 		v3f up = { 0, 1, 0 };
 		float camSpeed = 0.01f;
 
-		// Movement settings
+		// Interactions
 		float mouseScrollingSpeed = 2.0f;
 		float mouseSensitivity = 0.1f;
 		float mouseLastX = 0.0f;
 		float mouseLastY = 0.0f;
 		bool isMouseOverGui = false;
+		int currentObjectSelected = -1;
 
 		// Frame timers
 		float deltaTime = 0.0f;
@@ -338,6 +339,23 @@ namespace tinyrender
 		return true;
 	}
 
+	/*!
+	\brief Try to delete an object from the scene given its id.
+	Will not throw any error if the id is invalid or no object exists with this id.
+	\param id the object id
+	*/
+	static bool _internalTryDeleteObject(int id)
+	{
+		if (id < 0 || id >= internalObjects.size())
+			return false;
+		for (int i = 0; i < internalObjects.size(); i++)
+		{
+			if (i == id)
+				return _internalDeleteObject(i);
+		}
+		return false;
+	}
+
 	/*
 	\brief Returns the next free index in the internal object array.
 	*/
@@ -349,6 +367,49 @@ namespace tinyrender
 				return i;
 		}
 		return int(internalObjects.size());
+	}
+
+	/*!
+	\brief Internal GUI rendering with dear imgui
+	*/
+	static void _internalRenderGui()
+	{
+		// Rendering options
+		ImGui::Begin("Rendering");
+		{
+			if (ImGui::Checkbox("Lighting", &internalScene.doLighting))
+				setDoLighting(internalScene.doLighting);
+			if (ImGui::Checkbox("Wireframe", &internalScene.drawWireframe))
+				setDrawWireframe(internalScene.drawWireframe);
+			if (ImGui::SliderFloat("Thickness", &internalScene.wireframeThickness, 1.0f, 2.0f))
+				setWireframeThickness(internalScene.wireframeThickness);
+			if (ImGui::Checkbox("Show Normals", &internalScene.showNormals))
+				setShowNormals(internalScene.showNormals);
+			ImGui::Text("Light direction");
+			ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
+			ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
+			ImGui::DragFloat("z", &internalScene.lightDir.z, 0.1f, -1.0f, 1.0f);
+
+			ImGui::Separator();
+			ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / float(ImGui::GetIO().Framerate), float(ImGui::GetIO().Framerate));
+		}
+		ImGui::End();
+
+		// Scene view for interacting
+		ImGui::Begin("Scene");
+		{
+			for (int i = 0; i < internalObjects.size(); i++)
+			{
+				if (internalObjects[i].isDeleted)
+					continue;
+
+				bool selected = (internalScene.currentObjectSelected == i);
+				std::string objectName = "Object " + std::to_string(i);
+				if (ImGui::Selectable(objectName.c_str(), selected))
+					internalScene.currentObjectSelected = i;
+			}
+		}
+		ImGui::End();
 	}
 
 
@@ -574,58 +635,78 @@ namespace tinyrender
 		internalScene.deltaTime = currentFrame - internalScene.lastFrame;
 		internalScene.lastFrame = currentFrame;
 
-		// Keyboard
-		float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;
-		if (glfwGetKey(windowPtr, GLFW_KEY_LEFT))
-			x -= 0.1f;
-		if (glfwGetKey(windowPtr, GLFW_KEY_RIGHT))
-			x += 0.1f;
-		if (glfwGetKey(windowPtr, GLFW_KEY_UP))
-			y += 0.1f;
-		if (glfwGetKey(windowPtr, GLFW_KEY_DOWN))
-			y -= 0.1f;
-		if (glfwGetKey(windowPtr, GLFW_KEY_PAGE_UP))
-			z += 0.1f;
-		if (glfwGetKey(windowPtr, GLFW_KEY_PAGE_DOWN))
-			z -= 0.1f;
-
-		// Mouse
-		double xpos, ypos;
-		glfwGetCursorPos(windowPtr, &xpos, &ypos);
-		int state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_LEFT);
-		if (state == GLFW_PRESS && !internalScene.isMouseOverGui)
+		// Keyboard shortcut
 		{
-			float xoffset = float(xpos) - internalScene.mouseLastX;
-
-			// Reversed since y-coordinates go from bottom to top
-			float yoffset = internalScene.mouseLastY - float(ypos);
-			x += (xoffset * internalScene.mouseSensitivity);
-			y += (yoffset * internalScene.mouseSensitivity);
-		}
-		state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_MIDDLE);
-		if (state == GLFW_PRESS && !internalScene.isMouseOverGui)
-		{
-			float xoffset = float(xpos) - internalScene.mouseLastX;
-			float yoffset = float(ypos) - internalScene.mouseLastY;
-			xPlane += (xoffset * internalScene.mouseSensitivity);
-			yPlane += (yoffset * internalScene.mouseSensitivity);
+			// Object deletion
+			if (getKey(GLFW_KEY_DELETE))
+			{
+				int toDeleteIndex = internalScene.currentObjectSelected;
+				_internalTryDeleteObject(toDeleteIndex);
+			}
 		}
 
-		// Scale speed based on distance to the look at point
-		float scale = internalLength(internalScene.at - internalScene.eye);
-		scale = scale > 100.0f ? 100.0f : scale;
-		x *= scale * internalScene.camSpeed * 0.55f;
-		y *= scale * internalScene.camSpeed * 0.55f;
-		z *= scale * internalScene.camSpeed * 0.025f;
-		xPlane *= scale * internalScene.camSpeed;
-		yPlane *= scale * internalScene.camSpeed;
+		// Camera mouvements
+		{
+			// Keyboard
+			float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;
+			if (glfwGetKey(windowPtr, GLFW_KEY_LEFT))
+				x -= 0.1f;
+			if (glfwGetKey(windowPtr, GLFW_KEY_RIGHT))
+				x += 0.1f;
+			if (glfwGetKey(windowPtr, GLFW_KEY_UP))
+				y += 0.1f;
+			if (glfwGetKey(windowPtr, GLFW_KEY_DOWN))
+				y -= 0.1f;
+			if (glfwGetKey(windowPtr, GLFW_KEY_PAGE_UP))
+				z += 0.1f;
+			if (glfwGetKey(windowPtr, GLFW_KEY_PAGE_DOWN))
+				z -= 0.1f;
 
-		// Apply everything
-		_internalCameraMove(x, y, z, xPlane, yPlane);
+			// Mouse
+			bool userHasClicked = false;
+			double xpos, ypos;
+			glfwGetCursorPos(windowPtr, &xpos, &ypos);
+			int state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_LEFT);
+			if (state == GLFW_PRESS && !internalScene.isMouseOverGui)
+			{
+				float xoffset = float(xpos) - internalScene.mouseLastX;
 
-		// Store last mouse pos
-		internalScene.mouseLastX = float(xpos);
-		internalScene.mouseLastY = float(ypos);
+				// Reversed since y-coordinates go from bottom to top
+				float yoffset = internalScene.mouseLastY - float(ypos);
+				x += (xoffset * internalScene.mouseSensitivity);
+				y += (yoffset * internalScene.mouseSensitivity);
+				userHasClicked = true;
+			}
+			state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_MIDDLE);
+			if (state == GLFW_PRESS && !internalScene.isMouseOverGui)
+			{
+				float xoffset = float(xpos) - internalScene.mouseLastX;
+				float yoffset = float(ypos) - internalScene.mouseLastY;
+				xPlane += (xoffset * internalScene.mouseSensitivity);
+				yPlane += (yoffset * internalScene.mouseSensitivity);
+				userHasClicked = true;
+			}
+
+			// Scale speed based on distance to the look at point
+			float scale = internalLength(internalScene.at - internalScene.eye);
+			scale = scale > 100.0f ? 100.0f : scale;
+			x *= scale * internalScene.camSpeed * 0.55f;
+			y *= scale * internalScene.camSpeed * 0.55f;
+			z *= scale * internalScene.camSpeed * 0.025f;
+			xPlane *= scale * internalScene.camSpeed;
+			yPlane *= scale * internalScene.camSpeed;
+
+			// Apply everything
+			_internalCameraMove(x, y, z, xPlane, yPlane);
+
+			// Store last mouse pos
+			internalScene.mouseLastX = float(xpos);
+			internalScene.mouseLastY = float(ypos);
+
+			// Reset user selection if he clicks in the 3D scene
+			if (userHasClicked)
+				internalScene.currentObjectSelected = -1;
+		}
 	}
 
 	/*!
@@ -671,33 +752,12 @@ namespace tinyrender
 			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
 		}
 
-		// Prepare imgui frame for later
+		// Imgui rendering
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
-
-		// Internal imgui
-		{
-			ImGui::Begin("Rendering");
-			internalScene.isMouseOverGui = ImGui::IsWindowHovered() || ImGui::IsAnyItemHovered();
-			if (ImGui::Checkbox("Lighting", &internalScene.doLighting))
-				setDoLighting(internalScene.doLighting);
-			if (ImGui::Checkbox("Wireframe", &internalScene.drawWireframe))
-				setDrawWireframe(internalScene.drawWireframe);
-			if (ImGui::SliderFloat("Wireframe thickness", &internalScene.wireframeThickness, 1.0f, 2.0f))
-				setWireframeThickness(internalScene.wireframeThickness);
-			if (ImGui::Checkbox("Show Normals", &internalScene.showNormals))
-				setShowNormals(internalScene.showNormals);
-			ImGui::Text("Light direction");
-			ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
-			ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
-			ImGui::DragFloat("z", &internalScene.lightDir.z, 0.1f, -1.0f, 1.0f);
-
-			ImGui::Separator();
-			ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / float(ImGui::GetIO().Framerate), float(ImGui::GetIO().Framerate));
-
-			ImGui::End();
-		}
+		_internalRenderGui();
+		internalScene.isMouseOverGui = ImGui::GetIO().WantCaptureMouse;
 	}
 
 	/*!
@@ -751,7 +811,7 @@ namespace tinyrender
 	*/
 	bool removeObject(int id)
 	{
-		assert(id < internalObjects.size());
+		assert(id >= 0 && id < internalObjects.size());
 		return _internalDeleteObject(id);
 	}
 
@@ -765,7 +825,7 @@ namespace tinyrender
 	*/
 	void updateObject(int id, const object& obj)
 	{
-		assert(id < internalObjects.size());
+		assert(id >= 0 && id < internalObjects.size());
 		_internalUpdateObject(id, obj);
 	}
 
@@ -777,7 +837,7 @@ namespace tinyrender
 	*/
 	void updateObject(int id, const v3f& position, const v3f& scale)
 	{
-		assert(id < internalObjects.size());
+		assert(id >= 0 && id < internalObjects.size());
 		object_internal& obj = internalObjects[id];
 		_internalComputeModelMatrix(obj.modelMatrix, position, scale);
 	}
@@ -789,7 +849,7 @@ namespace tinyrender
 	*/
 	void updateObject(int id, const std::vector<v3f>& newColors)
 	{
-		assert(id < internalObjects.size());
+		assert(id >= 0 && id < internalObjects.size());
 		assert(!newColors.empty());
 		_internalUpdateObject(id, newColors);
 	}
@@ -895,7 +955,7 @@ namespace tinyrender
 		newObj.normals.resize(s);
 
 		// Create set of vertices
-		const float Pi = 3.14159265358979323846;
+		const float Pi = 3.14159265358979323846f;
 		const float HalfPi = Pi / 2.0f;
 		const float dt = Pi / n;
 		const float df = Pi / n;
