@@ -225,6 +225,11 @@ namespace tinyrender
 	{
 		object_internal ret;
 
+		// Default colors
+		std::vector<v3f> colors = obj.colors;
+		if (colors.empty())
+			colors.resize(obj.vertices.size(), { 0.5f, 0.5f, 0.5f });
+
 		// Model matrix
 		_internalComputeModelMatrix(ret.modelMatrix, obj.position, obj.scale);
 
@@ -233,33 +238,30 @@ namespace tinyrender
 		glBindVertexArray(ret.vao);
 
 		// OpenGL buffers
-		int fullSize = sizeof(v3f) * int(obj.vertices.size() + obj.normals.size() + obj.colors.size());
+		size_t fullSize = sizeof(v3f) * size_t(obj.vertices.size() + obj.normals.size() + colors.size());
 		glGenBuffers(1, &ret.buffers);
 		glBindBuffer(GL_ARRAY_BUFFER, ret.buffers);
 		glBufferData(GL_ARRAY_BUFFER, fullSize, nullptr, GL_STATIC_DRAW);
+
 		size_t size = 0;
 		size_t offset = 0;
 		size = sizeof(v3f) * obj.vertices.size();
 		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.vertices.front());
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
 		glEnableVertexAttribArray(0);
+
 		offset = offset + size;
 		size = sizeof(v3f) * obj.normals.size();
 		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.normals.front());
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
 		glEnableVertexAttribArray(1);
-		if (obj.colors.size() > 0)
-		{
-			offset = offset + size;
-			size = sizeof(v3f) * obj.colors.size();
-			glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.colors.front());
-			glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
-			glEnableVertexAttribArray(2);
-		}
-		else
-		{
-			fprintf(stdout, "Warning: object does not have any colors");
-		}
+
+		offset = offset + size;
+		size = sizeof(v3f) * colors.size();
+		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &colors.front());
+		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
+		glEnableVertexAttribArray(2);
+
 		glGenBuffers(1, &ret.triangleBuffer);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ret.triangleBuffer);
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(int) * obj.triangles.size(), &obj.triangles.front(), GL_STATIC_DRAW);
@@ -328,8 +330,8 @@ namespace tinyrender
 		glDeleteBuffers(1, &obj.triangleBuffer);
 		glDeleteVertexArrays(1, &obj.vao);
 
-		// obj is not actually removed from the internal vector, but flagged as deleted.
-		// This is to ensure indices of existing object will not change.
+		// Objects are not actually removed from the internal vector, but flagged as deleted.
+		// This is to ensure indices of existing objects will not change from the API point of view.
 		obj.isDeleted = true;
 
 		return true;
@@ -352,13 +354,12 @@ namespace tinyrender
 	/*!
 	\brief Init a window sized (width, height) with a given name.
 	\param windowName name of the window on top bar
-	\param width, height window dimensions. If either is -1, then the window will 
+	\param width, height window dimensions. If either is -1, then the window will
 	maximized at startup with screen resolution.
 	*/
 	void init(const char* windowName, int width, int height)
 	{
 		// Window
-		// -------------------------------------------------------------------------------
 		glfwInit();
 		if (width == -1 || height == -1)
 		{
@@ -368,7 +369,7 @@ namespace tinyrender
 		}
 		width_internal = width;
 		height_internal = height;
-		
+
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -388,18 +389,17 @@ namespace tinyrender
 		glfwSwapInterval(1);
 		glfwSetInputMode(windowPtr, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 		glfwSetWindowSizeCallback(windowPtr, [](GLFWwindow* win, int w, int h)
-		{
-			glViewport(0, 0, w, h);
-			width_internal = w;
-			height_internal = h;
-		});
+			{
+				glViewport(0, 0, w, h);
+				width_internal = w;
+				height_internal = h;
+			});
 		glfwSetScrollCallback(windowPtr, [](GLFWwindow* win, double x, double y)
-		{
-			_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
-		});
+			{
+				_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
+			});
 
 		// OpenGL
-		// -------------------------------------------------------------------------------
 		glewInit();
 		glEnable(GL_DEPTH_TEST);
 		GLenum err = glGetError();
@@ -411,7 +411,6 @@ namespace tinyrender
 		}
 
 		// Shaders
-		// -------------------------------------------------------------------------------
 		const GLchar* vertexShaderSource =
 			"#version 330\n"
 			"layout (location = 0) in vec3 vertex;\n"
@@ -482,7 +481,7 @@ namespace tinyrender
 			"	 vec3 col = fragColor;\n"
 			"	 if (showNormals == 1) {\n"
 			"		col = vec3(0.2*(vec3(3.0,3.0,3.0)+2.0*fragNormal));\n"
-			"		d = 1.f\n;"	
+			"		d = 1.f\n;"
 			"	 }\n"
 			"	 float w = min(dist[0], min(dist[1], dist[2]));\n"
 			"	 float I = exp2(-1 * w * w);\n"
@@ -614,9 +613,9 @@ namespace tinyrender
 		// Scale speed based on distance to the look at point
 		float scale = internalLength(internalScene.at - internalScene.eye);
 		scale = scale > 100.0f ? 100.0f : scale;
-		x *= scale * internalScene.camSpeed * 0.25f;
-		y *= scale * internalScene.camSpeed * 0.25f;
-		z *= scale * internalScene.camSpeed * 0.0025f;
+		x *= scale * internalScene.camSpeed * 0.55f;
+		y *= scale * internalScene.camSpeed * 0.55f;
+		z *= scale * internalScene.camSpeed * 0.025f;
 		xPlane *= scale * internalScene.camSpeed;
 		yPlane *= scale * internalScene.camSpeed;
 
@@ -686,7 +685,7 @@ namespace tinyrender
 			ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
 			ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
 			ImGui::DragFloat("z", &internalScene.lightDir.z, 0.1f, -1.0f, 1.0f);
-			
+
 			ImGui::Separator();
 			ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / float(ImGui::GetIO().Framerate), float(ImGui::GetIO().Framerate));
 
@@ -721,8 +720,10 @@ namespace tinyrender
 
 
 	/*!
-	\brief Add an object to the internal hierarchy. Rendering buffers are allocated here.
-	\param object new object
+	\brief Add an object to the internal hierarchy. The object must be initialized in a specific way.
+	Vertex and normal arrays should be of the same size, and the triangle array refers to both vertex and normal indices.
+	Colors are optionals and will be set to grey by default.
+	\param object new object with properly initialized vectors.
 	\returns the id of the object in the hierarchy.
 	*/
 	int addObject(const object& obj)
@@ -749,7 +750,7 @@ namespace tinyrender
 
 	/*!
 	\brief Update an object with new data, given its id. Note that the internal object (with id as an identifier) should
-	already be initialized.	The update must also only be be with data of same size; it will fail if you change the 
+	already be initialized.	The update must also only be be with data of same size; it will fail if you change the
 	internal array sizes.
 	\param id identifier
 	\param obj new object data
@@ -775,11 +776,11 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Update an object colors given its id. 
+	\brief Update an object colors given its id.
 	\param id object id
-	\param newColors new per-vertex color array.
+	\param newColors new per-vertex color array. Must be of the same size as the vertex array of the existing object.
 	*/
-	void updateObjectColors(int id, const std::vector<v3f>& newColors)
+	void updateObject(int id, const std::vector<v3f>& newColors)
 	{
 		assert(id < internalObjects.size());
 		assert(!newColors.empty());
@@ -862,12 +863,102 @@ namespace tinyrender
 
 
 	/*!
-	\brief Creates a subdivided plane object.
-	\param size world space size
-	\param n subdivision
+	\brief Add a new sphere object of a given radius centered at the origin.
+	\param r radius
+	\param n subdivision parameter
+	\return the id of the new sphere object
 	*/
-	int pushPlaneRegularMesh(float size, int n)
+	int addSphere(float r, int n)
 	{
+		object newObj;
+
+		const int p = 2 * n;
+		const int s = (2 * n) * (n - 1) + 2;
+		newObj.vertices.resize(s);
+		newObj.normals.resize(s);
+
+		// Create set of vertices
+		const float Pi = 3.14159265358979323846;
+		const float HalfPi = Pi / 2.0f;
+		const float dt = Pi / n;
+		const float df = Pi / n;
+		int k = 0;
+
+		float f = -HalfPi;
+		for (int j = 1; j < n; j++)
+		{
+			f += df;
+
+			// Theta
+			float t = 0.0;
+			for (int i = 0; i < 2 * n; i++)
+			{
+				v3f u = { cos(t) * cos(f), sin(f), sin(t) * cos(f) };
+				newObj.normals[k] = u;
+				newObj.vertices[k] = u * r;
+				k++;
+				t += dt;
+			}
+		}
+		// North pole
+		newObj.normals[s - 2] = { 0, 1, 0 };
+		newObj.vertices[s - 2] = { 0, r, 0 };
+
+		// South
+		newObj.normals[s - 1] = { 0, -1, 0 };
+		newObj.vertices[s - 1] = { 0, -r, 0 };
+
+		// Reserve space for the smooth triangle array
+		newObj.triangles.reserve(4 * n * (n - 1) * 3);
+
+		// South cap
+		for (int i = 0; i < 2 * n; i++)
+		{
+			newObj.triangles.push_back(s - 1);
+			newObj.triangles.push_back((i + 1) % p);
+			newObj.triangles.push_back(i);
+		}
+
+		// North cap
+		for (int i = 0; i < 2 * n; i++)
+		{
+			newObj.triangles.push_back(s - 2);
+			newObj.triangles.push_back(2 * n * (n - 2) + i);
+			newObj.triangles.push_back(2 * n * (n - 2) + (i + 1) % p);
+		}
+
+		// Sphere
+		for (int j = 1; j < n - 1; j++)
+		{
+			for (int i = 0; i < 2 * n; i++)
+			{
+				const int v0 = (j - 1) * p + i;
+				const int v1 = (j - 1) * p + (i + 1) % p;
+				const int v2 = j * p + (i + 1) % p;
+				const int v3 = j * p + i;
+
+				newObj.triangles.push_back(v0);
+				newObj.triangles.push_back(v1);
+				newObj.triangles.push_back(v2);
+
+				newObj.triangles.push_back(v0);
+				newObj.triangles.push_back(v2);
+				newObj.triangles.push_back(v3);
+			}
+		}
+
+		return addObject(newObj);
+	}
+
+	/*!
+	\brief Creates a subdivided plane object of a given size centered at the origin.
+	\param size total extents of the plane
+	\param n subdivision, ie. number of cells.
+	\return the id of the new plane object
+	*/
+	int addPlane(float size, int n)
+	{
+		n = n + 1;
 		v3f a({ -size, 0.0f, -size });
 		v3f b({ size, 0.0f, size });
 		v3f step = (b - a) / float(n - 1);
@@ -908,6 +999,69 @@ namespace tinyrender
 		}
 
 		return addObject(planeObject);
+	}
+
+	/*!
+	\brief Creates a cubic box object of a given size centered at the origin. 
+	The cube is actually made of 6 quads each with their own vertices and normals.
+	\param size radius of the box
+	\return the id of the new box object
+	*/
+	int addBox(float size)
+	{
+		object newObj;
+
+		const float r = size / 2.0f;
+
+		// x negative
+		newObj.vertices.push_back({ -r, -r, -r }); newObj.vertices.push_back({ -r, r, -r });
+		newObj.vertices.push_back({ -r, r, r }); newObj.vertices.push_back({ -r, -r, r });
+		newObj.normals.push_back({ -1, 0, 0 });	newObj.normals.push_back({ -1, 0, 0 });
+		newObj.normals.push_back({ -1, 0, 0 });	newObj.normals.push_back({ -1, 0, 0 });
+		newObj.triangles.push_back(0); newObj.triangles.push_back(1); newObj.triangles.push_back(2); 
+		newObj.triangles.push_back(0); newObj.triangles.push_back(2); newObj.triangles.push_back(3);
+
+		// x positive
+		newObj.vertices.push_back({ r, -r, -r }); newObj.vertices.push_back({ r, r, -r });
+		newObj.vertices.push_back({ r, r, r }); newObj.vertices.push_back({ r, -r, r });
+		newObj.normals.push_back({ 1, 0, 0 });	newObj.normals.push_back({ 1, 0, 0 });
+		newObj.normals.push_back({ 1, 0, 0 });	newObj.normals.push_back({ 1, 0, 0 });
+		newObj.triangles.push_back(4); newObj.triangles.push_back(5); newObj.triangles.push_back(6);
+		newObj.triangles.push_back(4); newObj.triangles.push_back(6); newObj.triangles.push_back(7);
+
+		// y negative
+		newObj.vertices.push_back({ -r, -r, -r }); newObj.vertices.push_back({ -r, -r, r });
+		newObj.vertices.push_back({ r, -r, r }); newObj.vertices.push_back({ r, -r, -r });
+		newObj.normals.push_back({ 0, -1, 0 });	newObj.normals.push_back({ 0, -1, 0 });
+		newObj.normals.push_back({ 0, -1, 0 });	newObj.normals.push_back({ 0, -1, 0 });
+		newObj.triangles.push_back(8); newObj.triangles.push_back(9); newObj.triangles.push_back(10);
+		newObj.triangles.push_back(8); newObj.triangles.push_back(10); newObj.triangles.push_back(11);
+
+		// y positive
+		newObj.vertices.push_back({ -r, r, -r }); newObj.vertices.push_back({ -r, r, r });
+		newObj.vertices.push_back({ r, r, r }); newObj.vertices.push_back({ r, r, -r });
+		newObj.normals.push_back({ 0, 1, 0 });	newObj.normals.push_back({ 0, 1, 0 });
+		newObj.normals.push_back({ 0, 1, 0 });	newObj.normals.push_back({ 0, 1, 0 });
+		newObj.triangles.push_back(12); newObj.triangles.push_back(13); newObj.triangles.push_back(14);
+		newObj.triangles.push_back(12); newObj.triangles.push_back(14); newObj.triangles.push_back(15);
+
+		// z negative
+		newObj.vertices.push_back({ -r, -r, -r }); newObj.vertices.push_back({ -r, r, -r });
+		newObj.vertices.push_back({ r, r, -r }); newObj.vertices.push_back({ r, -r, -r });
+		newObj.normals.push_back({ 0, 0, -1 });	newObj.normals.push_back({ 0, 0, -1 });
+		newObj.normals.push_back({ 0, 0, -1 });	newObj.normals.push_back({ 0, 0, -1 });
+		newObj.triangles.push_back(16); newObj.triangles.push_back(17); newObj.triangles.push_back(18);
+		newObj.triangles.push_back(16); newObj.triangles.push_back(18); newObj.triangles.push_back(19);
+
+		// z positive
+		newObj.vertices.push_back({ -r, -r, r }); newObj.vertices.push_back({ -r, r, r });
+		newObj.vertices.push_back({ r, r, r }); newObj.vertices.push_back({ r, -r, r });
+		newObj.normals.push_back({ 0, 0, 1 });	newObj.normals.push_back({ 0, 0, 1 });
+		newObj.normals.push_back({ 0, 0, 1 });	newObj.normals.push_back({ 0, 0, 1 });
+		newObj.triangles.push_back(20); newObj.triangles.push_back(21); newObj.triangles.push_back(22);
+		newObj.triangles.push_back(20); newObj.triangles.push_back(22); newObj.triangles.push_back(23);
+
+		return addObject(newObj);
 	}
 
 	/*!

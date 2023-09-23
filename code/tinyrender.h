@@ -104,14 +104,14 @@ namespace tinyrender
 	void swap();
 	void terminate();
 
-	// 3D objects
+	// Object management
 	int addObject(const object& obj);
 	bool removeObject(int id);
 	void updateObject(int id, const object& obj);
 	void updateObject(int id, const v3f& position, const v3f& scale);
-	void updateObjectColors(int id, const std::vector<v3f>& newColors);
+	void updateObject(int id, const std::vector<v3f>& newColors);
 
-	// Parameters
+	// Scene parameters
 	void setDoLighting(bool doLighting);
 	void setDrawWireframe(bool drawWireframe);
 	void setShowNormals(bool showNormals);
@@ -121,8 +121,9 @@ namespace tinyrender
 	void setLightDir(float x, float y, float z);
 
 	// Simple mesh API
-	// TODO: provide more function for sphere and box
-	int pushPlaneRegularMesh(float size, int n);
+	int addSphere(float r, int n);
+	int addPlane(float size, int n);
+	int addBox(float size);
 	bool exportObjFile(const char* filename, const object& object);
 }
 

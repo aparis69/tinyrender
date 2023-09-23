@@ -60,18 +60,33 @@ static void LoadMesh(const char* path, tinyrender::object& obj) {
 	}
 }
 
+static void ExampleLoadMesh()
+{
+	tinyrender::object obj;
+	LoadMesh("../resources/airboat.obj", obj);
+	tinyrender::addObject(obj);
+}
+
+static void ExamplePrimitives()
+{
+	int id = tinyrender::addSphere(1.0f, 16);
+	tinyrender::updateObject(id, { 1.5f, 0.f, 0.f }, { 1.0f, 1.0f, 1.0f });
+
+	id = tinyrender::addPlane(1.0f, 4);
+	tinyrender::updateObject(id, { -1.5f, 0.f, 0.f }, { 1.0f, 1.0f, 1.0f });
+
+	id = tinyrender::addBox(1.0f);
+	tinyrender::updateObject(id, { -4.5f, 0.f, 0.f }, { 1.0f, 1.0f, 1.0f });
+}
+
 int main() {
-	tinyrender::init("tinyrender", 1280, 720);
+	tinyrender::init("tinyrender", 800, 600);
 	tinyrender::setCameraAt(0.f, 0.f, 0.f);
 	tinyrender::setCameraEye(-10.f, 1.f, 0.f);
 	
-	tinyrender::object obj;
-	LoadMesh("../resources/airboat.obj", obj);
-	obj.colors.resize(obj.vertices.size());
-	for (auto& col : obj.colors) {
-		col = { .6f, .6f, .6f };
-	}
-	int id = tinyrender::addObject(obj);
+	//ExampleLoadMesh();
+	ExamplePrimitives();
+
 	while (!tinyrender::shouldQuit())
 	{
 		tinyrender::update();
