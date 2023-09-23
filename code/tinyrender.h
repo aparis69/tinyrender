@@ -114,6 +114,7 @@ namespace tinyrender
 	// Scene parameters
 	void setDoLighting(bool doLighting);
 	void setDrawWireframe(bool drawWireframe);
+	void setWireframeThickness(float thickness);
 	void setShowNormals(bool showNormals);
 	void setCameraEye(float x, float y, float z);
 	void setCameraAt(float x, float y, float z);

@@ -47,6 +47,7 @@ namespace tinyrender
 		bool doLighting = true;
 		bool showNormals = false;
 		bool drawWireframe = true;
+		float wireframeThickness = 1.0f;
 	};
 
 	static GLFWwindow* windowPtr;
@@ -416,16 +417,16 @@ namespace tinyrender
 			"layout (location = 0) in vec3 vertex;\n"
 			"layout (location = 1) in vec3 normal;\n"
 			"layout (location = 2) in vec3 color;\n"
-			"uniform mat4 u_projection;\n"
-			"uniform mat4 u_view;\n"
-			"uniform mat4 u_model;\n"
+			"uniform mat4 uProjection;\n"
+			"uniform mat4 uView;\n"
+			"uniform mat4 uModel;\n"
 			"out vec3 geomPos;\n"
 			"out vec3 geomNormal;\n"
 			"out vec3 geomColor;\n"
 			"void main()\n"
 			"{\n"
 			"	 geomPos = vertex;\n"
-			"    gl_Position = u_projection * u_view * u_model * vec4(vertex, 1.0f);\n"
+			"    gl_Position = uProjection * uView * uModel * vec4(vertex, 1.0f);\n"
 			"	 geomNormal = normalize(normal);\n"
 			"    geomColor = color;\n"
 			"}\n";
@@ -436,16 +437,16 @@ namespace tinyrender
 			"in vec3 geomPos[];\n"
 			"in vec3 geomNormal[];\n"
 			"in vec3 geomColor[];\n"
-			"uniform vec2 WIN_SCALE;\n"
+			"uniform vec2 uWireframeThickness;\n"
 			"out vec3 fragPos;\n"
 			"out vec3 fragNormal;\n"
 			"out vec3 fragColor;\n"
 			"out vec3 dist;\n"
 			"void main()\n"
 			"{\n"
-			"	vec2 p0 = WIN_SCALE * gl_in[0].gl_Position.xy / gl_in[0].gl_Position.w;\n"
-			"	vec2 p1 = WIN_SCALE * gl_in[1].gl_Position.xy / gl_in[1].gl_Position.w;\n"
-			"	vec2 p2 = WIN_SCALE * gl_in[2].gl_Position.xy / gl_in[2].gl_Position.w;\n"
+			"	vec2 p0 = uWireframeThickness * gl_in[0].gl_Position.xy / gl_in[0].gl_Position.w;\n"
+			"	vec2 p1 = uWireframeThickness * gl_in[1].gl_Position.xy / gl_in[1].gl_Position.w;\n"
+			"	vec2 p2 = uWireframeThickness * gl_in[2].gl_Position.xy / gl_in[2].gl_Position.w;\n"
 			"	vec2 v0 = p2 - p1;\n"
 			"	vec2 v1 = p2 - p0;;\n"
 			"	vec2 v2 = p1 - p0;;\n"
@@ -470,22 +471,22 @@ namespace tinyrender
 			"in vec3 fragNormal;\n"
 			"in vec3 fragColor;\n"
 			"in vec3 dist;\n"
-			"uniform vec3 u_light_dir;\n"
-			"uniform int doLighting;\n"
-			"uniform int drawWireframe;\n"
-			"uniform int showNormals;\n"
+			"uniform vec3 uLightDir;\n"
+			"uniform int uDoLighting;\n"
+			"uniform int uDrawWireframe;\n"
+			"uniform int uShowNormals;\n"
 			"out vec4 outFragmentColor;\n"
 			"void main()\n"
 			"{\n"
-			"	 float d = doLighting == 1 ? 0.5 * (1.0 + dot(fragNormal, u_light_dir)) : 1.0f;\n"
+			"	 float d = uDoLighting == 1 ? 0.5 * (1.0 + dot(fragNormal, uLightDir)) : 1.0f;\n"
 			"	 vec3 col = fragColor;\n"
-			"	 if (showNormals == 1) {\n"
+			"	 if (uShowNormals == 1) {\n"
 			"		col = vec3(0.2*(vec3(3.0,3.0,3.0)+2.0*fragNormal));\n"
 			"		d = 1.f\n;"
 			"	 }\n"
 			"	 float w = min(dist[0], min(dist[1], dist[2]));\n"
 			"	 float I = exp2(-1 * w * w);\n"
-			"	 if (drawWireframe == 1)\n"
+			"	 if (uDrawWireframe == 1)\n"
 			"		col = I * vec3(0.1) + (1.0 - I) * col;\n"
 			"	 outFragmentColor = vec4(col * d, 1.0); \n"
 			"}\n";
@@ -641,6 +642,10 @@ namespace tinyrender
 		_internalCameraLookAt(viewMatrix);
 		_internalCameraPerspective(projectionMatrix);
 
+		// Precomputed uniform values
+		const float wireframeThicknessX = float(width_internal) / internalScene.wireframeThickness;
+		const float wireframeThicknessY = float(height_internal) / internalScene.wireframeThickness;
+
 		// Render all objects
 		v3f normalizedLight = internalNormalize(internalScene.lightDir);
 		for (int i = 0; i < internalObjects.size(); i++)
@@ -653,14 +658,14 @@ namespace tinyrender
 			GLuint shaderID = internalShaders[0];
 
 			glUseProgram(shaderID);
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "u_projection"), 1, GL_FALSE, &projectionMatrix[0][0]);
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "u_view"), 1, GL_FALSE, &viewMatrix[0][0]);
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "u_model"), 1, GL_FALSE, &it.modelMatrix[0][0]);
-			glUniform3f(glGetUniformLocation(shaderID, "u_light_dir"), normalizedLight[0], normalizedLight[1], normalizedLight[2]);
-			glUniform1i(glGetUniformLocation(shaderID, "doLighting"), int(internalScene.doLighting));
-			glUniform1i(glGetUniformLocation(shaderID, "drawWireframe"), int(internalScene.drawWireframe));
-			glUniform1i(glGetUniformLocation(shaderID, "showNormals"), int(internalScene.showNormals));
-			glUniform2f(glGetUniformLocation(shaderID, "WIN_SCALE"), float(width_internal) / 2.0f, float(height_internal) / 2.0f);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, &projectionMatrix[0][0]);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, &viewMatrix[0][0]);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, &it.modelMatrix[0][0]);
+			glUniform3f(glGetUniformLocation(shaderID, "uLightDir"), normalizedLight[0], normalizedLight[1], normalizedLight[2]);
+			glUniform1i(glGetUniformLocation(shaderID, "uDoLighting"), int(internalScene.doLighting));
+			glUniform1i(glGetUniformLocation(shaderID, "uDrawWireframe"), int(internalScene.drawWireframe));
+			glUniform2f(glGetUniformLocation(shaderID, "uWireframeThickness"), wireframeThicknessX, wireframeThicknessY);
+			glUniform1i(glGetUniformLocation(shaderID, "uShowNormals"), int(internalScene.showNormals));
 
 			glBindVertexArray(it.vao);
 			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
@@ -676,11 +681,13 @@ namespace tinyrender
 			ImGui::Begin("Rendering");
 			internalScene.isMouseOverGui = ImGui::IsWindowHovered() || ImGui::IsAnyItemHovered();
 			if (ImGui::Checkbox("Lighting", &internalScene.doLighting))
-				tinyrender::setDoLighting(internalScene.doLighting);
+				setDoLighting(internalScene.doLighting);
 			if (ImGui::Checkbox("Wireframe", &internalScene.drawWireframe))
-				tinyrender::setDrawWireframe(internalScene.drawWireframe);
+				setDrawWireframe(internalScene.drawWireframe);
+			if (ImGui::SliderFloat("Wireframe thickness", &internalScene.wireframeThickness, 1.0f, 2.0f))
+				setWireframeThickness(internalScene.wireframeThickness);
 			if (ImGui::Checkbox("Show Normals", &internalScene.showNormals))
-				tinyrender::setShowNormals(internalScene.showNormals);
+				setShowNormals(internalScene.showNormals);
 			ImGui::Text("Light direction");
 			ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
 			ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
@@ -804,6 +811,16 @@ namespace tinyrender
 	void setDrawWireframe(bool drawWireframe)
 	{
 		internalScene.drawWireframe = drawWireframe;
+	}
+
+	/*!
+	\brief Set the wireframe line thicknes on the screen.
+	Something between [1.0, 2.0] works well.
+	\param thickness the new value
+	*/
+	void setWireframeThickness(float thickness)
+	{
+		internalScene.wireframeThickness = thickness;
 	}
 
 	/*!
