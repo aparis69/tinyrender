@@ -4,6 +4,7 @@
 #include "../dependency/GL/glew.h"
 #include "../dependency/GLFW/glfw3.h"
 #include "../dependency/imgui/imgui.h"
+#include "../dependency/imguizmo/ImGuizmo.h"
 
 #include <cmath>
 #include <vector>

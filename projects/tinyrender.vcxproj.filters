@@ -12,6 +12,9 @@
     <Filter Include="Fichiers sources\Imgui">
       <UniqueIdentifier>{3a55693c-4c61-4b52-ab3f-ec9bcb85ba67}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Fichiers sources\ImGuizmo">
+      <UniqueIdentifier>{398131f2-c4c0-44f7-aaea-51aa6cce3489}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\code\tinyrender.h">
@@ -45,6 +48,9 @@
     </ClCompile>
     <ClCompile Include="..\dependency\imgui\backends\imgui_impl_opengl3.cpp">
       <Filter>Fichiers sources\Imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dependency\imguizmo\ImGuizmo.cpp">
+      <Filter>Fichiers sources\ImGuizmo</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

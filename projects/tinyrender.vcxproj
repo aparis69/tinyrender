@@ -143,6 +143,7 @@
     <ClInclude Include="..\code\tinyrender.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\dependency\imguizmo\ImGuizmo.cpp" />
     <ClCompile Include="..\dependency\imgui\backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="..\dependency\imgui\backends\imgui_impl_opengl3.cpp" />
     <ClCompile Include="..\dependency\imgui\imgui.cpp" />
