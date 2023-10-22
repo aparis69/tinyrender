@@ -379,39 +379,48 @@ namespace tinyrender
 	*/
 	static void _internalRenderGui()
 	{
-		// Rendering options
-		ImGui::Begin("Rendering");
+		ImGui::Begin("tinyrender");
 		{
-			if (ImGui::Checkbox("Lighting", &internalScene.doLighting))
-				setDoLighting(internalScene.doLighting);
-			if (ImGui::Checkbox("Wireframe", &internalScene.drawWireframe))
-				setDrawWireframe(internalScene.drawWireframe);
-			if (ImGui::SliderFloat("Thickness", &internalScene.wireframeThickness, 1.0f, 2.0f))
-				setWireframeThickness(internalScene.wireframeThickness);
-			if (ImGui::Checkbox("Show Normals", &internalScene.showNormals))
-				setShowNormals(internalScene.showNormals);
-			ImGui::Text("Light direction");
-			ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
-			ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
-			ImGui::DragFloat("z", &internalScene.lightDir.z, 0.1f, -1.0f, 1.0f);
-
-			ImGui::Separator();
-			ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / float(ImGui::GetIO().Framerate), float(ImGui::GetIO().Framerate));
-		}
-		ImGui::End();
-
-		// Scene view for interacting
-		ImGui::Begin("Scene");
-		{
-			for (int i = 0; i < internalObjects.size(); i++)
+			ImGui::Text("Rendering");
 			{
-				if (internalObjects[i].isDeleted)
-					continue;
+				if (ImGui::Checkbox("Lighting", &internalScene.doLighting))
+					setDoLighting(internalScene.doLighting);
+				if (ImGui::Checkbox("Wireframe", &internalScene.drawWireframe))
+					setDrawWireframe(internalScene.drawWireframe);
+				if (ImGui::SliderFloat("Thickness", &internalScene.wireframeThickness, 1.0f, 2.0f))
+					setWireframeThickness(internalScene.wireframeThickness);
+				if (ImGui::Checkbox("Show Normals", &internalScene.showNormals))
+					setShowNormals(internalScene.showNormals);
+				ImGui::Text("Light direction");
+				ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
+				ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
+				ImGui::DragFloat("z", &internalScene.lightDir.z, 0.1f, -1.0f, 1.0f);
+				ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / float(ImGui::GetIO().Framerate), float(ImGui::GetIO().Framerate));
+			}
 
-				bool selected = (internalScene.currentObjectSelected == i);
-				std::string objectName = "Object " + std::to_string(i);
-				if (ImGui::Selectable(objectName.c_str(), selected))
-					internalScene.currentObjectSelected = i;
+			ImGui::Spacing(); ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Text("Camera");
+			{	
+				ImGui::Text("Eye (%.3f, %.3f, %.3f)", internalScene.eye.x, internalScene.eye.y, internalScene.eye.z);
+				ImGui::Text("At (%.3f, %.3f, %.3f)", internalScene.at.x, internalScene.at.y, internalScene.at.z);
+				ImGui::Text("Up (%.3f, %.3f, %.3f)", internalScene.up.x, internalScene.up.y, internalScene.up.z);
+			}
+
+			ImGui::Spacing(); ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Text("Scene");
+			{
+				for (int i = 0; i < internalObjects.size(); i++)
+				{
+					if (internalObjects[i].isDeleted)
+						continue;
+
+					bool selected = (internalScene.currentObjectSelected == i);
+					std::string objectName = "Object " + std::to_string(i);
+					if (ImGui::Selectable(objectName.c_str(), selected))
+						internalScene.currentObjectSelected = i;
+				}
 			}
 		}
 		ImGui::End();
@@ -643,7 +652,7 @@ namespace tinyrender
 		internalScene.deltaTime = currentFrame - internalScene.lastFrame;
 		internalScene.lastFrame = currentFrame;
 
-		// Keyboard shortcut
+		// Scene management shortcut
 		{
 			// Object deletion
 			if (getKey(GLFW_KEY_DELETE))
@@ -652,7 +661,7 @@ namespace tinyrender
 				_internalTryDeleteObject(toDeleteIndex);
 			}
 		}
-		
+
 		// Guizmo keyboard shortcut
 		if (getKey(GLFW_KEY_G))
 			internalScene.isGuizmoRendered = !internalScene.isGuizmoRendered;
@@ -663,20 +672,21 @@ namespace tinyrender
 		if (getKey(GLFW_KEY_S))
 			internalScene.guizmoOp = ImGuizmo::SCALE;
 
-		// Camera mouvements
+		// Camera movements
 		{
-			// Keyboard	float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;			
+			// Keyboard	
+			float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;
 			if (getKey(GLFW_KEY_LEFT))
 				x -= 0.1f;
-		if (getKey(GLFW_KEY_RIGHT))
+			if (getKey(GLFW_KEY_RIGHT))
 				x += 0.1f;
-		if (getKey(GLFW_KEY_UP))
+			if (getKey(GLFW_KEY_UP))
 				y += 0.1f;
-		if (getKey(GLFW_KEY_DOWN))
+			if (getKey(GLFW_KEY_DOWN))
 				y -= 0.1f;
-		if (getKey(GLFW_KEY_PAGE_UP))
+			if (getKey(GLFW_KEY_PAGE_UP))
 				z += 0.1f;
-		if (getKey(GLFW_KEY_PAGE_DOWN))
+			if (getKey(GLFW_KEY_PAGE_DOWN))
 				z -= 0.1f;
 
 			// Mouse
@@ -684,7 +694,7 @@ namespace tinyrender
 			double xpos, ypos;
 			glfwGetCursorPos(windowPtr, &xpos, &ypos);
 			int state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_LEFT);
-		if (state == GLFW_PRESS)
+			if (state == GLFW_PRESS)
 			{
 				float xoffset = float(xpos) - internalScene.mouseLastX;
 
@@ -695,7 +705,7 @@ namespace tinyrender
 				userHasClicked = true;
 			}
 			state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_MIDDLE);
-		if (state == GLFW_PRESS)
+			if (state == GLFW_PRESS)
 			{
 				float xoffset = float(xpos) - internalScene.mouseLastX;
 				float yoffset = float(ypos) - internalScene.mouseLastY;
@@ -714,8 +724,8 @@ namespace tinyrender
 			yPlane *= scale * internalScene.camSpeed;
 
 			// Apply everything
-		if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
-			_internalCameraMove(-x, y, z, xPlane, yPlane); 	// TODO(Axel): fix the -x
+			if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
+				_internalCameraMove(-x, y, z, xPlane, yPlane); 	// TODO(Axel): fix the -x
 
 			// Store last mouse pos
 			internalScene.mouseLastX = float(xpos);
@@ -774,36 +784,30 @@ namespace tinyrender
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
-		ImGuizmo::BeginFrame();
 		internalScene.isMouseOverGui = ImGui::GetIO().WantCaptureMouse;
-			
-			ImGui::Separator();
-			ImGui::Text("Camera data");
-			ImGui::Text("Eye (%.3f, %.3f, %.3f)", internalScene.eye.x, internalScene.eye.y, internalScene.eye.z);
-			ImGui::Text("At (%.3f, %.3f, %.3f)", internalScene.at.x, internalScene.at.y, internalScene.at.z);
-			ImGui::Text("Up (%.3f, %.3f, %.3f)", internalScene.up.x, internalScene.up.y, internalScene.up.z);
-
+		
+		// Guizmo
+		ImGuizmo::BeginFrame();
+		if (internalScene.isGuizmoRendered)
+		{
+			ImGuizmo::Enable(true);
+			ImGuizmo::SetOrthographic(false);
+			ImGuizmo::SetRect(0, 0, width_internal, height_internal);
+			ImGuizmo::Manipulate(
+				camViewMatrix,
+				camProjMatrix,
+				internalScene.guizmoOp,
+				ImGuizmo::WORLD,
+				internalScene.guizmoMat,
+				NULL,
+				NULL,
+				NULL,
+				NULL
+			);
 		}
 
-		// Internal imguizmo
-		{
-			if (internalScene.isGuizmoRendered)
-			{
-				ImGuizmo::Enable(true);
-				ImGuizmo::SetOrthographic(false);
-				ImGuizmo::SetRect(0, 0, width_internal, height_internal);
-				ImGuizmo::Manipulate(
-					camViewMatrix,
-					camProjMatrix,
-					internalScene.guizmoOp,
-					ImGuizmo::WORLD,
-					internalScene.guizmoMat,
-					NULL,
-					NULL,
-					NULL,
-					NULL
-				);
-			}		
+		// Internal gui and guizmo rendering
+		_internalRenderGui();
 	}
 
 	/*!
@@ -1125,7 +1129,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Creates a cubic box object of a given size centered at the origin. 
+	\brief Creates a cubic box object of a given size centered at the origin.
 	The cube is actually made of 6 quads each with their own vertices and normals.
 	\param size radius of the box
 	\return the id of the new box object
@@ -1141,7 +1145,7 @@ namespace tinyrender
 		newObj.vertices.push_back({ -r, r, r }); newObj.vertices.push_back({ -r, -r, r });
 		newObj.normals.push_back({ -1, 0, 0 });	newObj.normals.push_back({ -1, 0, 0 });
 		newObj.normals.push_back({ -1, 0, 0 });	newObj.normals.push_back({ -1, 0, 0 });
-		newObj.triangles.push_back(0); newObj.triangles.push_back(1); newObj.triangles.push_back(2); 
+		newObj.triangles.push_back(0); newObj.triangles.push_back(1); newObj.triangles.push_back(2);
 		newObj.triangles.push_back(0); newObj.triangles.push_back(2); newObj.triangles.push_back(3);
 
 		// x positive
