@@ -16,7 +16,7 @@ namespace tinyrender
 		GLuint vao = 0;
 		GLuint buffers = 0;
 		GLuint triangleBuffer = 0;
-		float modelMatrix[4][4] = { 0 };
+		float modelMatrix[16] = { 0 };
 		int triangleCount = 0;
 		bool isDeleted = false;
 	};
@@ -43,6 +43,11 @@ namespace tinyrender
 		float deltaTime = 0.0f;
 		float lastFrame = 0.0f;
 
+		// Gizmo matrix
+		bool isGuizmoRendered = false;
+		float guizmoMat[16];
+		ImGuizmo::OPERATION guizmoOp = ImGuizmo::TRANSLATE;
+
 		// Render flags
 		v3f lightDir = { 1, 1, 0 };
 		bool doLighting = true;
@@ -62,59 +67,59 @@ namespace tinyrender
 	\brief Initialize a 4x4 matrix to identity.
 	\param Result matrix to initialize
 	*/
-	static void _internalIdentity(float Result[4][4])
+	static void _internalIdentity(float Result[16])
 	{
-		for (int i = 0; i < 4; i++)
-		{
-			for (int j = 0; j < 4; j++)
-				Result[i][j] = 0.0f;
-		}
-		Result[0][0] = 1.0f;
-		Result[1][1] = 1.0f;
-		Result[2][2] = 1.0f;
-		Result[3][3] = 1.0f;
+		for (int i = 0; i < 16; i++)
+			Result[i] = 0.0f;
+		Result[0 * 4 + 0] = 1.0f;
+		Result[1 * 4 + 1] = 1.0f;
+		Result[2 * 4 + 2] = 1.0f;
+		Result[3 * 4 + 3] = 1.0f;
 	}
 
 	/*!
 	\brief Compute the look at matrix for the current internal camera.
 	\param Result look at matrix.
 	*/
-	static void _internalCameraLookAt(float Result[4][4])
+	static void _internalCameraLookAt(float Result[16])
 	{
 		v3f const f = internalNormalize(internalScene.at - internalScene.eye);
 		v3f const s = internalNormalize(internalCross(f, { 0, 1, 0 }));
 		v3f const u = internalCross(s, f);
 
-		Result[0][0] = s.x;
-		Result[1][0] = s.y;
-		Result[2][0] = s.z;
-		Result[0][1] = u.x;
-		Result[1][1] = u.y;
-		Result[2][1] = u.z;
-		Result[0][2] = -f.x;
-		Result[1][2] = -f.y;
-		Result[2][2] = -f.z;
-		Result[3][0] = -internalDot(s, internalScene.eye);
-		Result[3][1] = -internalDot(u, internalScene.eye);
-		Result[3][2] = internalDot(f, internalScene.eye);
-		Result[3][3] = 1.0f;
+		Result[0] = s.x;
+		Result[1] = s.y;
+		Result[2] = s.z;
+
+		Result[4] = u.x;
+		Result[5] = u.y;
+		Result[6] = u.z;
+
+		Result[8] = -f.x;
+		Result[9] = -f.y;
+		Result[10] = -f.z;
+
+		Result[12] = -internalDot(s, internalScene.eye);
+		Result[13] = -internalDot(u, internalScene.eye);
+		Result[14] = internalDot(f, internalScene.eye);
+		Result[15] = 1.0f;
 	}
 
 	/*!
 	\brief Compute the perspective matrix for the current internal camera.
 	\param Result perspective matrix.
 	*/
-	static void _internalCameraPerspective(float Result[4][4])
+	static void _internalCameraPerspective(float Result[16])
 	{
 		float const tanHalfFovy = tan(toRadian(45.0f) / 2.0f);
 		float const zNear = internalScene.zNear;
 		float const zFar = internalScene.zFar;
 
-		Result[0][0] = 1.0f / (((float)width_internal) / ((float)height_internal) * tanHalfFovy);
-		Result[1][1] = 1.0f / (tanHalfFovy);
-		Result[2][2] = -(zFar + zNear) / (zFar - zNear);
-		Result[2][3] = -1.0f;
-		Result[3][2] = -(2.0f * zFar * zNear) / (zFar - zNear);
+		Result[0] = 1.0f / (((float)width_internal) / ((float)height_internal) * tanHalfFovy);
+		Result[5] = 1.0f / (tanHalfFovy);
+		Result[10] = -(zFar + zNear) / (zFar - zNear);
+		Result[11] = -1.0f;
+		Result[14] = -(2.0f * zFar * zNear) / (zFar - zNear);
 	}
 
 	/*
@@ -178,23 +183,23 @@ namespace tinyrender
 	\param p translation
 	\param s scale
 	*/
-	static void _internalComputeModelMatrix(float Result[4][4], const v3f& p, const v3f& s)
+	static void _internalComputeModelMatrix(float Result[16], const v3f& p, const v3f& s)
 	{
 		// Identity
 		_internalIdentity(Result);
 
 		// Translation
-		Result[3][0] = p.x;
-		Result[3][1] = p.y;
-		Result[3][2] = p.z;
+		Result[3 * 4 + 0] = p.x;
+		Result[3 * 4 + 1] = p.y;
+		Result[3 * 4 + 2] = p.z;
 
 		// No rotation for now
-		// Empty
+		// TODO(Axel)
 
 		// Scale
-		Result[0][0] = s.x;
-		Result[1][1] = s.y;
-		Result[2][2] = s.z;
+		Result[0 * 4 + 0] = s.x;
+		Result[1 * 4 + 1] = s.y;
+		Result[2 * 4 + 2] = s.z;
 	}
 
 	/*!
@@ -591,6 +596,9 @@ namespace tinyrender
 		ImGui::CreateContext();
 		ImGui_ImplGlfw_InitForOpenGL(windowPtr, true);
 		ImGui_ImplOpenGL3_Init("#version 330");
+
+		// Imguizmo
+		_internalIdentity(internalScene.guizmoMat);
 	}
 
 	/*!
@@ -602,7 +610,7 @@ namespace tinyrender
 	}
 
 	/*
-	\brief Check if a given key has been pressed in the last frame.
+	\brief Check if a given key is being pressed.
 	\param key the key
 	*/
 	bool getKey(int key)
@@ -644,22 +652,31 @@ namespace tinyrender
 				_internalTryDeleteObject(toDeleteIndex);
 			}
 		}
+		
+		// Guizmo keyboard shortcut
+		if (getKey(GLFW_KEY_G))
+			internalScene.isGuizmoRendered = !internalScene.isGuizmoRendered;
+		if (getKey(GLFW_KEY_T))
+			internalScene.guizmoOp = ImGuizmo::TRANSLATE;
+		if (getKey(GLFW_KEY_R))
+			internalScene.guizmoOp = ImGuizmo::ROTATE;
+		if (getKey(GLFW_KEY_S))
+			internalScene.guizmoOp = ImGuizmo::SCALE;
 
 		// Camera mouvements
 		{
-			// Keyboard
-			float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;
-			if (glfwGetKey(windowPtr, GLFW_KEY_LEFT))
+			// Keyboard	float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;			
+			if (getKey(GLFW_KEY_LEFT))
 				x -= 0.1f;
-			if (glfwGetKey(windowPtr, GLFW_KEY_RIGHT))
+		if (getKey(GLFW_KEY_RIGHT))
 				x += 0.1f;
-			if (glfwGetKey(windowPtr, GLFW_KEY_UP))
+		if (getKey(GLFW_KEY_UP))
 				y += 0.1f;
-			if (glfwGetKey(windowPtr, GLFW_KEY_DOWN))
+		if (getKey(GLFW_KEY_DOWN))
 				y -= 0.1f;
-			if (glfwGetKey(windowPtr, GLFW_KEY_PAGE_UP))
+		if (getKey(GLFW_KEY_PAGE_UP))
 				z += 0.1f;
-			if (glfwGetKey(windowPtr, GLFW_KEY_PAGE_DOWN))
+		if (getKey(GLFW_KEY_PAGE_DOWN))
 				z -= 0.1f;
 
 			// Mouse
@@ -667,7 +684,7 @@ namespace tinyrender
 			double xpos, ypos;
 			glfwGetCursorPos(windowPtr, &xpos, &ypos);
 			int state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_LEFT);
-			if (state == GLFW_PRESS && !internalScene.isMouseOverGui)
+		if (state == GLFW_PRESS)
 			{
 				float xoffset = float(xpos) - internalScene.mouseLastX;
 
@@ -678,7 +695,7 @@ namespace tinyrender
 				userHasClicked = true;
 			}
 			state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_MIDDLE);
-			if (state == GLFW_PRESS && !internalScene.isMouseOverGui)
+		if (state == GLFW_PRESS)
 			{
 				float xoffset = float(xpos) - internalScene.mouseLastX;
 				float yoffset = float(ypos) - internalScene.mouseLastY;
@@ -697,7 +714,8 @@ namespace tinyrender
 			yPlane *= scale * internalScene.camSpeed;
 
 			// Apply everything
-			_internalCameraMove(x, y, z, xPlane, yPlane);
+		if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
+			_internalCameraMove(-x, y, z, xPlane, yPlane); 	// TODO(Axel): fix the -x
 
 			// Store last mouse pos
 			internalScene.mouseLastX = float(xpos);
@@ -719,9 +737,9 @@ namespace tinyrender
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		// Camera matrices
-		float viewMatrix[4][4] = { 0 }, projectionMatrix[4][4] = { 0 };
-		_internalCameraLookAt(viewMatrix);
-		_internalCameraPerspective(projectionMatrix);
+		float camViewMatrix[16] = { 0 }, camProjMatrix[16] = { 0 };
+		_internalCameraLookAt(camViewMatrix);
+		_internalCameraPerspective(camProjMatrix);
 
 		// Precomputed uniform values
 		const float wireframeThicknessX = float(width_internal) / internalScene.wireframeThickness;
@@ -739,9 +757,9 @@ namespace tinyrender
 			GLuint shaderID = internalShaders[0];
 
 			glUseProgram(shaderID);
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, &projectionMatrix[0][0]);
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, &viewMatrix[0][0]);
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, &it.modelMatrix[0][0]);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, &camProjMatrix[0]);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, &camViewMatrix[0]);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, &it.modelMatrix[0]);
 			glUniform3f(glGetUniformLocation(shaderID, "uLightDir"), normalizedLight[0], normalizedLight[1], normalizedLight[2]);
 			glUniform1i(glGetUniformLocation(shaderID, "uDoLighting"), int(internalScene.doLighting));
 			glUniform1i(glGetUniformLocation(shaderID, "uDrawWireframe"), int(internalScene.drawWireframe));
@@ -752,12 +770,40 @@ namespace tinyrender
 			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
 		}
 
-		// Imgui rendering
+		// Prepare imgui/imguizmo frames
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
-		_internalRenderGui();
+		ImGuizmo::BeginFrame();
 		internalScene.isMouseOverGui = ImGui::GetIO().WantCaptureMouse;
+			
+			ImGui::Separator();
+			ImGui::Text("Camera data");
+			ImGui::Text("Eye (%.3f, %.3f, %.3f)", internalScene.eye.x, internalScene.eye.y, internalScene.eye.z);
+			ImGui::Text("At (%.3f, %.3f, %.3f)", internalScene.at.x, internalScene.at.y, internalScene.at.z);
+			ImGui::Text("Up (%.3f, %.3f, %.3f)", internalScene.up.x, internalScene.up.y, internalScene.up.z);
+
+		}
+
+		// Internal imguizmo
+		{
+			if (internalScene.isGuizmoRendered)
+			{
+				ImGuizmo::Enable(true);
+				ImGuizmo::SetOrthographic(false);
+				ImGuizmo::SetRect(0, 0, width_internal, height_internal);
+				ImGuizmo::Manipulate(
+					camViewMatrix,
+					camProjMatrix,
+					internalScene.guizmoOp,
+					ImGuizmo::WORLD,
+					internalScene.guizmoMat,
+					NULL,
+					NULL,
+					NULL,
+					NULL
+				);
+			}		
 	}
 
 	/*!

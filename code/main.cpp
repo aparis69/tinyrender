@@ -42,8 +42,7 @@ static void LoadMesh(const char* path, tinyrender::object& obj) {
 	}
 
 	// Make sure the loaded object has normals
-	bool hasNormals = attrib.normals.size() > 0;
-	if (!hasNormals)
+	if (attrib.normals.size() == 0)
 	{
 		for (int i = 0; i < obj.triangles.size(); i += 3)
 		{
@@ -60,29 +59,26 @@ static void LoadMesh(const char* path, tinyrender::object& obj) {
 	}
 }
 
-static void ExampleLoadMesh()
-{
+static void ExampleLoadMesh() {
 	tinyrender::object obj;
 	LoadMesh("../resources/airboat.obj", obj);
 	tinyrender::addObject(obj);
 }
 
-static void ExamplePrimitives()
-{
+static void ExamplePrimitives() {
 	int id = tinyrender::addSphere(1.0f, 16);
-	tinyrender::updateObject(id, { 1.5f, 0.f, 0.f }, { 1.0f, 1.0f, 1.0f });
 
 	id = tinyrender::addPlane(1.0f, 4);
-	tinyrender::updateObject(id, { -1.5f, 0.f, 0.f }, { 1.0f, 1.0f, 1.0f });
+	tinyrender::updateObject(id, { -2.5f, 0.f, 0.f }, { 1.0f, 1.0f, 1.0f });
 
 	id = tinyrender::addBox(1.0f);
-	tinyrender::updateObject(id, { -4.5f, 0.f, 0.f }, { 1.0f, 1.0f, 1.0f });
+	tinyrender::updateObject(id, { 2.5f, 0.f, 0.f }, { 1.0f, 1.0f, 1.0f });
 }
 
 int main() {
 	tinyrender::init("tinyrender", 800, 600);
 	tinyrender::setCameraAt(0.f, 0.f, 0.f);
-	tinyrender::setCameraEye(-10.f, 1.f, 0.f);
+	tinyrender::setCameraEye(0.f, 1.f, -10.0f);
 	
 	//ExampleLoadMesh();
 	ExamplePrimitives();
