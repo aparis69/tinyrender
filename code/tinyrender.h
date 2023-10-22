@@ -182,10 +182,10 @@ namespace tinyrender
 	void setDrawWireframe(bool drawWireframe);
 	void setWireframeThickness(float thickness);
 	void setShowNormals(bool showNormals);
-	void setCameraEye(float x, float y, float z);
-	void setCameraAt(float x, float y, float z);
+	void setCameraEye(const v3f& newEye);
+	void setCameraAt(const v3f& newAt);
 	void setCameraPlanes(float near, float far);
-	void setLightDir(float x, float y, float z);
+	void setLightDir(const v3f& newLightDir);
 
 	// Simple mesh API
 	int addSphere(float r, int n);

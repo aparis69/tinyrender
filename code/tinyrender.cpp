@@ -33,6 +33,9 @@ namespace tinyrender
 		v3f at = { 0 };
 		v3f up = { 0, 1, 0 };
 		float camSpeed = 0.01f;
+		m4 bakedLookAtMatrix;
+		m4 bakedPerspectiveMatrix;
+		bool cameraWasChangedInLastframe = true;
 
 		// Interactions
 		float mouseScrollingSpeed = 2.0f;
@@ -66,11 +69,9 @@ namespace tinyrender
 
 
 	/*
-	\brief Apply a translation to the camera, in camera space.
-	Also deals with camera panning in screen space.
-	\param x translation X
-	\param y translation Y
-	\param z translation Z
+	\brief Apply a translation to the camera, in camera space. Also deals with panning in screen space.
+	\param x, y, z translation in camera space
+	\param xPlane, yPlane translation in screen space (panning)
 	*/
 	static void _internalCameraMove(float x, float y, float z, float xPlane, float yPlane)
 	{
@@ -83,6 +84,8 @@ namespace tinyrender
 
 			internalScene.up = internalNormalize(internalCross(s, -f));
 			internalScene.eye = internalScene.at - f;
+
+			internalScene.cameraWasChangedInLastframe = true;
 		}
 		if (y != 0.0f)
 		{
@@ -96,12 +99,16 @@ namespace tinyrender
 
 			internalScene.up = internalCross(f, s);
 			internalScene.eye = internalScene.at - f * length;
+
+			internalScene.cameraWasChangedInLastframe = true;
 		}
 		if (z != 0.0f)
 		{
 			v3f f = internalScene.at - internalScene.eye;
 			float moveScale = internalLength(f) * 0.025f;
 			internalScene.eye += (internalNormalize(f) * z) * moveScale;
+
+			internalScene.cameraWasChangedInLastframe = true;
 		}
 		if (xPlane != 0.0f)
 		{
@@ -110,6 +117,8 @@ namespace tinyrender
 
 			internalScene.eye += s * xPlane;
 			internalScene.at += s * xPlane;
+			
+			internalScene.cameraWasChangedInLastframe = true;
 		}
 		if (yPlane != 0.0f)
 		{
@@ -117,6 +126,8 @@ namespace tinyrender
 
 			internalScene.eye += u * yPlane;
 			internalScene.at += u * yPlane;
+			
+			internalScene.cameraWasChangedInLastframe = true;
 		}
 	}
 
@@ -144,7 +155,7 @@ namespace tinyrender
 
 	/*!
 	\brief Create the internal representation of an object. Initialize opengl buffers.
-	\param obj high level object with mesh and color data.
+	\param obj high level object with mesh, color data, and model matrix.
 	*/
 	static object_internal _internalCreateObject(const object& obj)
 	{
@@ -196,7 +207,8 @@ namespace tinyrender
 	}
 
 	/*
-	\brief Update an already created object with new vertice/normal/color data.
+	\brief Update an already created object with new vertice/normal (and optionally color) data.
+	Also recompute the model matrix.
 	\param id object index
 	\param newObj new data for the object.
 	*/
@@ -231,6 +243,7 @@ namespace tinyrender
 	*/
 	static void _internalUpdateObject(int id, const std::vector<v3f>& newColors)
 	{
+		assert(!newColors.empty());
 		object_internal& obj = internalObjects[id];
 		glBindVertexArray(obj.vao);
 		glBindBuffer(GL_ARRAY_BUFFER, obj.buffers);
@@ -293,7 +306,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Internal GUI rendering with dear imgui
+	\brief Internal GUI rendering with dear imgui.
 	*/
 	static void _internalRenderGui()
 	{
@@ -349,7 +362,7 @@ namespace tinyrender
 	\brief Init a window sized (width, height) with a given name.
 	\param windowName name of the window on top bar
 	\param width, height window dimensions. If either is -1, then the window will
-	maximized at startup with screen resolution.
+	be maximized at startup with screen resolution.
 	*/
 	void init(const char* windowName, int width, int height)
 	{
@@ -383,15 +396,16 @@ namespace tinyrender
 		glfwSwapInterval(1);
 		glfwSetInputMode(windowPtr, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 		glfwSetWindowSizeCallback(windowPtr, [](GLFWwindow* win, int w, int h)
-			{
-				glViewport(0, 0, w, h);
-				width_internal = w;
-				height_internal = h;
-			});
+		{
+			glViewport(0, 0, w, h);
+			width_internal = w;
+			height_internal = h;
+			internalScene.cameraWasChangedInLastframe = true;
+		});
 		glfwSetScrollCallback(windowPtr, [](GLFWwindow* win, double x, double y)
-			{
-				_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
-			});
+		{
+			_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
+		});
 
 		// OpenGL
 		glewInit();
@@ -528,7 +542,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Returns true of the user closed the window or pressed escape, and false otherwise.
+	\brief Returns true if the user closed the window or pressed escape, false otherwise.
 	*/
 	bool shouldQuit()
 	{
@@ -554,7 +568,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Returns the elapsed time since window initialiazation.
+	\brief Returns the elapsed time since window initialization.
 	*/
 	float globalTime()
 	{
@@ -562,7 +576,7 @@ namespace tinyrender
 	}
 
 	/*
-	\brief Update function. Applies camera movements.
+	\brief Update function. Applies camera movements and guizmo updates.
 	*/
 	void update()
 	{
@@ -576,7 +590,11 @@ namespace tinyrender
 		{
 			// Object deletion
 			if (getKey(GLFW_KEY_DELETE))
-				_internalTryDeleteObject(internalScene.selectedObjectIndex);
+			{
+				bool success = _internalTryDeleteObject(internalScene.selectedObjectIndex);
+				if (success)
+					internalScene.selectedObjectIndex = -1;
+			}
 		}
 
 		// Guizmo keyboard shortcut
@@ -652,7 +670,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Performs rendering and swap window buffers.
+	\brief Performs rendering: scene, imgui, and finally imguizmo.
 	*/
 	void render()
 	{
@@ -663,8 +681,20 @@ namespace tinyrender
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		// Camera matrices
-		m4 camViewMatrix = lookAtMatrix(internalScene.eye, internalScene.at);
-		m4 camProjMatrix = perspectiveMatrix(internalScene.zNear, internalScene.zFar, width_internal, height_internal);
+		if (internalScene.cameraWasChangedInLastframe)
+		{
+			internalScene.bakedLookAtMatrix = lookAtMatrix(
+				internalScene.eye,
+				internalScene.at
+			);
+			internalScene.bakedPerspectiveMatrix = perspectiveMatrix(
+				internalScene.zNear, 
+				internalScene.zFar,
+				width_internal,
+				height_internal
+			);
+			internalScene.cameraWasChangedInLastframe = false;
+		}
 
 		// Precomputed uniform values
 		const float wireframeThicknessX = float(width_internal) / internalScene.wireframeThickness;
@@ -676,8 +706,8 @@ namespace tinyrender
 		glUseProgram(shaderID);
 
 		// Shared uniforms
-		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, &camProjMatrix(0, 0));
-		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, &camViewMatrix(0, 0));
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, internalScene.bakedPerspectiveMatrix.m);
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, internalScene.bakedLookAtMatrix.m);
 		glUniform3f(glGetUniformLocation(shaderID, "uLightDir"), normalizedLight.x, normalizedLight.y, normalizedLight.z);
 		glUniform1i(glGetUniformLocation(shaderID, "uDoLighting"), int(internalScene.doLighting));
 		glUniform1i(glGetUniformLocation(shaderID, "uDrawWireframe"), int(internalScene.drawWireframe));
@@ -692,7 +722,7 @@ namespace tinyrender
 				continue;
 
 			// Only unique uniform for an object is its model matrix
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, &it.modelMatrix(0, 0));
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, it.modelMatrix.m);
 
 			glBindVertexArray(it.vao);
 			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
@@ -712,11 +742,11 @@ namespace tinyrender
 			ImGuizmo::SetOrthographic(false);
 			ImGuizmo::SetRect(0, 0, width_internal, height_internal);
 			ImGuizmo::Manipulate(
-				&camViewMatrix(0, 0),
-				&camProjMatrix(0, 0),
+				internalScene.bakedLookAtMatrix.m,
+				internalScene.bakedPerspectiveMatrix.m,
 				internalScene.guizmoOp,
 				ImGuizmo::WORLD,
-				&internalObjects[internalScene.selectedObjectIndex].modelMatrix(0, 0),
+				internalObjects[internalScene.selectedObjectIndex].modelMatrix.m,
 				NULL,
 				NULL,
 				NULL,
@@ -745,7 +775,7 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Free allocated data and terminate window context.
+	\brief Free all allocated data and terminate window context.
 	*/
 	void terminate()
 	{
@@ -763,7 +793,7 @@ namespace tinyrender
 	Vertex and normal arrays should be of the same size, and the triangle array refers to both vertex and normal indices.
 	Colors are optionals and will be set to grey by default.
 	\param object new object with properly initialized vectors.
-	\returns the id of the object in the hierarchy.
+	\return the id of the object in the hierarchy.
 	*/
 	int addObject(const object& obj)
 	{
@@ -781,7 +811,7 @@ namespace tinyrender
 	/*!
 	\brief Removes an object from the internal hierarchy, given its id.
 	\param id identifier
-	\returns true of removal is successfull false otherwise.
+	\return true if removal was successful, false otherwise.
 	*/
 	bool removeObject(int id)
 	{
@@ -796,7 +826,7 @@ namespace tinyrender
 	internal array sizes.
 	\param id identifier
 	\param obj new object data
-	\returns true of update is successfull, false otherwise.
+	\return true of update is successful, false otherwise.
 	*/
 	void updateObject(int id, const object& obj)
 	{
@@ -835,7 +865,7 @@ namespace tinyrender
 
 	/*!
 	\brief Set the lighting flag (ie. should diffuse light be computed or not)
-	\param doLighting
+	\param doLighting new flag
 	*/
 	void setDoLighting(bool doLighting)
 	{
@@ -844,7 +874,7 @@ namespace tinyrender
 
 	/*!
 	\brief Draw the wireframe of all the objects or not.
-	\param drawWireframe
+	\param drawWireframe new flag
 	*/
 	void setDrawWireframe(bool drawWireframe)
 	{
@@ -853,8 +883,8 @@ namespace tinyrender
 
 	/*!
 	\brief Set the wireframe line thicknes on the screen.
-	Something between [1.0, 2.0] works well.
-	\param thickness the new value
+	Something between [1, 2] works well. Default is 1.
+	\param thickness the new thickness value
 	*/
 	void setWireframeThickness(float thickness)
 	{
@@ -863,7 +893,7 @@ namespace tinyrender
 
 	/*!
 	\brief Override the current rendering state and show the normals of all objects.
-	\param showNormals
+	\param showNormals new flag
 	*/
 	void setShowNormals(bool showNormals)
 	{
@@ -872,32 +902,25 @@ namespace tinyrender
 
 	/*!
 	\brief Set the camera eye position.
-	\param x
-	\param y
-	\param z
+	\param newEye new eye position
 	*/
-	void setCameraEye(float x, float y, float z)
+	void setCameraEye(const v3f& newEye)
 	{
-		internalScene.eye.x = x;
-		internalScene.eye.y = y;
-		internalScene.eye.z = z;
+		internalScene.eye = newEye;
 	}
 
 	/*!
 	\brief Set the camera look-at point.
-	\param x, y, z new look at position
+	\param newAt new at position
 	*/
-	void setCameraAt(float x, float y, float z)
+	void setCameraAt(const v3f& newAt)
 	{
-		internalScene.at.x = x;
-		internalScene.at.y = y;
-		internalScene.at.z = z;
+		internalScene.at = newAt;
 	}
 
 	/*
 	\brief Set the camera planes.
-	\param near near clipping plane
-	\param far far clipping plane
+	\param near, far new near/far clipping plane
 	*/
 	void setCameraPlanes(float near, float far)
 	{
@@ -906,14 +929,12 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Set the light position.
-	\param x, y, z new light position
+	\brief Set the light direction (must be normalized).
+	\param new light direction
 	*/
-	void setLightDir(float x, float y, float z)
+	void setLightDir(const v3f& newLightDir)
 	{
-		internalScene.lightDir.x = x;
-		internalScene.lightDir.y = y;
-		internalScene.lightDir.z = z;
+		internalScene.lightDir = newLightDir;
 	}
 
 
