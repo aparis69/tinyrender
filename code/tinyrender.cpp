@@ -19,7 +19,7 @@ namespace tinyrender
 		GLuint vao = 0;
 		GLuint buffers = 0;
 		GLuint triangleBuffer = 0;
-		float modelMatrix[16] = { 0 };
+		m4 modelMatrix;
 		int triangleCount = 0;
 		bool isDeleted = false;
 	};
@@ -64,65 +64,6 @@ namespace tinyrender
 	static scene_internal internalScene;
 	static bool initWasCalled = false;
 
-
-	/*!
-	\brief Initialize a 4x4 matrix to identity.
-	\param Result matrix to initialize
-	*/
-	static void _internalIdentity(float Result[16])
-	{
-		for (int i = 0; i < 16; i++)
-			Result[i] = 0.0f;
-		Result[0 * 4 + 0] = 1.0f;
-		Result[1 * 4 + 1] = 1.0f;
-		Result[2 * 4 + 2] = 1.0f;
-		Result[3 * 4 + 3] = 1.0f;
-	}
-
-	/*!
-	\brief Compute the look at matrix for the current internal camera.
-	\param Result look at matrix.
-	*/
-	static void _internalCameraLookAt(float Result[16])
-	{
-		v3f const f = internalNormalize(internalScene.at - internalScene.eye);
-		v3f const s = internalNormalize(internalCross(f, { 0, 1, 0 }));
-		v3f const u = internalCross(s, f);
-
-		Result[0] = s.x;
-		Result[1] = s.y;
-		Result[2] = s.z;
-
-		Result[4] = u.x;
-		Result[5] = u.y;
-		Result[6] = u.z;
-
-		Result[8] = -f.x;
-		Result[9] = -f.y;
-		Result[10] = -f.z;
-
-		Result[12] = -internalDot(s, internalScene.eye);
-		Result[13] = -internalDot(u, internalScene.eye);
-		Result[14] = internalDot(f, internalScene.eye);
-		Result[15] = 1.0f;
-	}
-
-	/*!
-	\brief Compute the perspective matrix for the current internal camera.
-	\param Result perspective matrix.
-	*/
-	static void _internalCameraPerspective(float Result[16])
-	{
-		float const tanHalfFovy = tan(toRadian(45.0f) / 2.0f);
-		float const zNear = internalScene.zNear;
-		float const zFar = internalScene.zFar;
-
-		Result[0] = 1.0f / (((float)width_internal) / ((float)height_internal) * tanHalfFovy);
-		Result[5] = 1.0f / (tanHalfFovy);
-		Result[10] = -(zFar + zNear) / (zFar - zNear);
-		Result[11] = -1.0f;
-		Result[14] = -(2.0f * zFar * zNear) / (zFar - zNear);
-	}
 
 	/*
 	\brief Apply a translation to the camera, in camera space.
@@ -179,31 +120,6 @@ namespace tinyrender
 		}
 	}
 
-	/*
-	\brief Compute the model matrices for a given position and scale. Rotation is not yet supported.
-	\param Result the resulting model matrix
-	\param p translation
-	\param s scale
-	*/
-	static void _internalComputeModelMatrix(float Result[16], const v3f& p, const v3f& s)
-	{
-		// Identity
-		_internalIdentity(Result);
-
-		// Translation
-		Result[3 * 4 + 0] = p.x;
-		Result[3 * 4 + 1] = p.y;
-		Result[3 * 4 + 2] = p.z;
-
-		// No rotation for now
-		// TODO(Axel)
-
-		// Scale
-		Result[0 * 4 + 0] = s.x;
-		Result[1 * 4 + 1] = s.y;
-		Result[2 * 4 + 2] = s.z;
-	}
-
 	/*!
 	\brief Check the shader compile status and print opengl logs if needed.
 	\param handle shader id
@@ -240,7 +156,7 @@ namespace tinyrender
 			colors.resize(obj.vertices.size(), { 0.5f, 0.5f, 0.5f });
 
 		// Model matrix
-		_internalComputeModelMatrix(ret.modelMatrix, obj.position, obj.scale);
+		ImGuizmo::RecomposeMatrixFromComponents(&obj.position.x, &obj.rotation.x, &obj.scale.x, ret.modelMatrix.m);
 
 		// VAO
 		glGenVertexArrays(1, &ret.vao);
@@ -289,7 +205,7 @@ namespace tinyrender
 		object_internal& obj = internalObjects[id];
 
 		// Model matrix
-		_internalComputeModelMatrix(obj.modelMatrix, newObj.position, newObj.scale);
+		ImGuizmo::RecomposeMatrixFromComponents(&newObj.position.x, &newObj.rotation.x, &newObj.scale.x, obj.modelMatrix.m);
 
 		glBindVertexArray(obj.vao);
 		glBindBuffer(GL_ARRAY_BUFFER, obj.buffers);
@@ -723,7 +639,7 @@ namespace tinyrender
 
 			// Apply everything
 			if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
-				_internalCameraMove(-x, y, z, xPlane, yPlane); 	// TODO(Axel): fix the -x
+				_internalCameraMove(x, y, z, xPlane, yPlane);
 
 			// Store last mouse pos
 			internalScene.mouseLastX = float(xpos);
@@ -747,9 +663,8 @@ namespace tinyrender
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		// Camera matrices
-		float camViewMatrix[16] = { 0 }, camProjMatrix[16] = { 0 };
-		_internalCameraLookAt(camViewMatrix);
-		_internalCameraPerspective(camProjMatrix);
+		m4 camViewMatrix = lookAtMatrix(internalScene.eye, internalScene.at);
+		m4 camProjMatrix = perspectiveMatrix(internalScene.zNear, internalScene.zFar, width_internal, height_internal);
 
 		// Precomputed uniform values
 		const float wireframeThicknessX = float(width_internal) / internalScene.wireframeThickness;
@@ -761,8 +676,8 @@ namespace tinyrender
 		glUseProgram(shaderID);
 
 		// Shared uniforms
-		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, &camProjMatrix[0]);
-		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, &camViewMatrix[0]);
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, &camProjMatrix(0, 0));
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, &camViewMatrix(0, 0));
 		glUniform3f(glGetUniformLocation(shaderID, "uLightDir"), normalizedLight.x, normalizedLight.y, normalizedLight.z);
 		glUniform1i(glGetUniformLocation(shaderID, "uDoLighting"), int(internalScene.doLighting));
 		glUniform1i(glGetUniformLocation(shaderID, "uDrawWireframe"), int(internalScene.drawWireframe));
@@ -777,7 +692,7 @@ namespace tinyrender
 				continue;
 
 			// Only unique uniform for an object is its model matrix
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, &it.modelMatrix[0]);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, &it.modelMatrix(0, 0));
 
 			glBindVertexArray(it.vao);
 			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
@@ -797,11 +712,11 @@ namespace tinyrender
 			ImGuizmo::SetOrthographic(false);
 			ImGuizmo::SetRect(0, 0, width_internal, height_internal);
 			ImGuizmo::Manipulate(
-				camViewMatrix,
-				camProjMatrix,
+				&camViewMatrix(0, 0),
+				&camProjMatrix(0, 0),
 				internalScene.guizmoOp,
 				ImGuizmo::WORLD,
-				internalObjects[internalScene.selectedObjectIndex].modelMatrix,
+				&internalObjects[internalScene.selectedObjectIndex].modelMatrix(0, 0),
 				NULL,
 				NULL,
 				NULL,
@@ -896,12 +811,12 @@ namespace tinyrender
 	\param pos new position
 	\param scale new scale
 	*/
-	void updateObject(int id, const v3f& position, const v3f& scale)
+	void updateObject(int id, const v3f& position, const v3f& rotation, const v3f& scale)
 	{
 		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 		assert(id >= 0 && id < internalObjects.size());
 		object_internal& obj = internalObjects[id];
-		_internalComputeModelMatrix(obj.modelMatrix, position, scale);
+		ImGuizmo::RecomposeMatrixFromComponents(&position.x, &rotation.x, &scale.x, obj.modelMatrix.m);
 	}
 
 	/*!

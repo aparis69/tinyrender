@@ -81,11 +81,76 @@ namespace tinyrender
 		return degrees * static_cast<float>(0.01745329251994329576923690768489);
 	}
 
+	typedef struct m4
+	{
+	public:
+		float m[16];
+
+		inline m4()
+		{
+			for (int i = 0; i < 16; i++)
+				m[i] = 0.0f;
+			m[toIndex1D(0, 0)] = 1.0f;
+			m[toIndex1D(1, 1)] = 1.0f;
+			m[toIndex1D(2, 2)] = 1.0f;
+			m[toIndex1D(3, 3)] = 1.0f;
+		}
+		inline int toIndex1D(int i, int j) const
+		{
+			return i * 4 + j;
+		}
+		inline float& operator()(int i, int j)
+		{
+			return m[toIndex1D(i, j)];
+		}
+		inline float operator()(int i, int j) const
+		{
+			return m[toIndex1D(i, j)];
+		}
+	};
+	inline m4 perspectiveMatrix(float zNear, float zFar, float width, float height)
+	{
+		const float tanHalfFovy = tan(toRadian(45.0f) / 2.0f);
+
+		m4 mat;
+		mat(0, 0) = 1.0f / (((float)width) / ((float)height) * tanHalfFovy);
+		mat(1, 1) = 1.0f / (tanHalfFovy);
+		mat(2, 2) = -(zFar + zNear) / (zFar - zNear);
+		mat(2, 3) = -1.0f;
+		mat(3, 2) = -(2.0f * zFar * zNear) / (zFar - zNear);
+
+		return mat;
+	}
+	inline m4 lookAtMatrix(const v3f& eye, const v3f& at)
+	{
+		const v3f f = internalNormalize(at - eye);
+		const v3f s = internalNormalize(internalCross(f, { 0, 1, 0 }));
+		const v3f u = internalCross(s, f);
+
+		m4 mat;
+		mat(0, 0) = s.x;
+		mat(1, 0) = s.y;
+		mat(2, 0) = s.z;
+		mat(0, 1) = u.x;
+		mat(1, 1) = u.y;
+		mat(2, 1) = u.z;
+		mat(0, 2) = -f.x;
+		mat(1, 2) = -f.y;
+		mat(2, 2) = -f.z;
+		mat(3, 0) = -internalDot(s, eye);
+		mat(3, 1) = -internalDot(u, eye);
+		mat(3, 2) = internalDot(f, eye);
+		mat(3, 3) = 1.0f;
+
+		return mat;
+	}
+
 	// Public interface
 	struct object
 	{
 	public:
 		v3f position = { 0, 0, 0 };
+		v3f rotation = { 0, 0, 0 };
 		v3f scale = { 1, 1, 1 };
 
 		std::vector<v3f> vertices;
@@ -109,7 +174,7 @@ namespace tinyrender
 	int addObject(const object& obj);
 	bool removeObject(int id);
 	void updateObject(int id, const object& obj);
-	void updateObject(int id, const v3f& position, const v3f& scale);
+	void updateObject(int id, const v3f& position, const v3f& rotation, const v3f& scale);
 	void updateObject(int id, const std::vector<v3f>& newColors);
 
 	// Scene parameters
