@@ -37,15 +37,13 @@ namespace tinyrender
 		float mouseLastX = 0.0f;
 		float mouseLastY = 0.0f;
 		bool isMouseOverGui = false;
-		int currentObjectSelected = -1;
+		int selectedObjectIndex = -1;
 
 		// Frame timers
 		float deltaTime = 0.0f;
 		float lastFrame = 0.0f;
 
-		// Gizmo matrix
-		bool isGuizmoRendered = false;
-		float guizmoMat[16];
+		// Gizmo
 		ImGuizmo::OPERATION guizmoOp = ImGuizmo::TRANSLATE;
 
 		// Render flags
@@ -61,6 +59,7 @@ namespace tinyrender
 	static std::vector<object_internal> internalObjects;
 	static std::vector<GLuint> internalShaders;
 	static scene_internal internalScene;
+	static bool initWasCalled = false;
 
 
 	/*!
@@ -325,11 +324,11 @@ namespace tinyrender
 
 	/*
 	\brief Deletes an object from the internal hierarchy. Destroys the opengl buffers.
-	\param id object index
+	\param index object index
 	*/
-	static bool _internalDeleteObject(int id)
+	static bool _internalDeleteObject(int index)
 	{
-		object_internal& obj = internalObjects[id];
+		object_internal& obj = internalObjects[index];
 		if (obj.isDeleted)
 			return false;
 
@@ -416,10 +415,10 @@ namespace tinyrender
 					if (internalObjects[i].isDeleted)
 						continue;
 
-					bool selected = (internalScene.currentObjectSelected == i);
+					bool selected = (internalScene.selectedObjectIndex == i);
 					std::string objectName = "Object " + std::to_string(i);
 					if (ImGui::Selectable(objectName.c_str(), selected))
-						internalScene.currentObjectSelected = i;
+						internalScene.selectedObjectIndex = i;
 				}
 			}
 		}
@@ -606,8 +605,7 @@ namespace tinyrender
 		ImGui_ImplGlfw_InitForOpenGL(windowPtr, true);
 		ImGui_ImplOpenGL3_Init("#version 330");
 
-		// Imguizmo
-		_internalIdentity(internalScene.guizmoMat);
+		initWasCalled = true;
 	}
 
 	/*!
@@ -624,6 +622,7 @@ namespace tinyrender
 	*/
 	bool getKey(int key)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 		return bool(glfwGetKey(windowPtr, key));
 	}
 
@@ -648,6 +647,8 @@ namespace tinyrender
 	*/
 	void update()
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+
 		float currentFrame = float(glfwGetTime());
 		internalScene.deltaTime = currentFrame - internalScene.lastFrame;
 		internalScene.lastFrame = currentFrame;
@@ -656,15 +657,10 @@ namespace tinyrender
 		{
 			// Object deletion
 			if (getKey(GLFW_KEY_DELETE))
-			{
-				int toDeleteIndex = internalScene.currentObjectSelected;
-				_internalTryDeleteObject(toDeleteIndex);
-			}
+				_internalTryDeleteObject(internalScene.selectedObjectIndex);
 		}
 
 		// Guizmo keyboard shortcut
-		if (getKey(GLFW_KEY_G))
-			internalScene.isGuizmoRendered = !internalScene.isGuizmoRendered;
 		if (getKey(GLFW_KEY_T))
 			internalScene.guizmoOp = ImGuizmo::TRANSLATE;
 		if (getKey(GLFW_KEY_R))
@@ -690,7 +686,7 @@ namespace tinyrender
 				z -= 0.1f;
 
 			// Mouse
-			bool userHasClicked = false;
+			bool userHasReleased = false;
 			double xpos, ypos;
 			glfwGetCursorPos(windowPtr, &xpos, &ypos);
 			int state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_LEFT);
@@ -702,8 +698,8 @@ namespace tinyrender
 				float yoffset = internalScene.mouseLastY - float(ypos);
 				x += (xoffset * internalScene.mouseSensitivity);
 				y += (yoffset * internalScene.mouseSensitivity);
-				userHasClicked = true;
 			}
+
 			state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_MIDDLE);
 			if (state == GLFW_PRESS)
 			{
@@ -711,7 +707,6 @@ namespace tinyrender
 				float yoffset = float(ypos) - internalScene.mouseLastY;
 				xPlane += (xoffset * internalScene.mouseSensitivity);
 				yPlane += (yoffset * internalScene.mouseSensitivity);
-				userHasClicked = true;
 			}
 
 			// Scale speed based on distance to the look at point
@@ -731,9 +726,9 @@ namespace tinyrender
 			internalScene.mouseLastX = float(xpos);
 			internalScene.mouseLastY = float(ypos);
 
-			// Reset user selection if he clicks in the 3D scene
-			if (userHasClicked)
-				internalScene.currentObjectSelected = -1;
+			// Reset user selection if he clicks in the 3D scene but not on a guizmo
+			if (userHasReleased && !ImGuizmo::IsUsing())
+				internalScene.selectedObjectIndex = -1;
 		}
 	}
 
@@ -742,6 +737,8 @@ namespace tinyrender
 	*/
 	void render()
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+
 		// Clear
 		glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -754,27 +751,30 @@ namespace tinyrender
 		// Precomputed uniform values
 		const float wireframeThicknessX = float(width_internal) / internalScene.wireframeThickness;
 		const float wireframeThicknessY = float(height_internal) / internalScene.wireframeThickness;
+		const v3f normalizedLight = internalNormalize(internalScene.lightDir);
+
+		// Single shader for now
+		GLuint shaderID = internalShaders[0];
+		glUseProgram(shaderID);
+
+		// Shared uniforms
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, &camProjMatrix[0]);
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, &camViewMatrix[0]);
+		glUniform3f(glGetUniformLocation(shaderID, "uLightDir"), normalizedLight.x, normalizedLight.y, normalizedLight.z);
+		glUniform1i(glGetUniformLocation(shaderID, "uDoLighting"), int(internalScene.doLighting));
+		glUniform1i(glGetUniformLocation(shaderID, "uDrawWireframe"), int(internalScene.drawWireframe));
+		glUniform2f(glGetUniformLocation(shaderID, "uWireframeThickness"), wireframeThicknessX, wireframeThicknessY);
+		glUniform1i(glGetUniformLocation(shaderID, "uShowNormals"), int(internalScene.showNormals));
 
 		// Render all objects
-		v3f normalizedLight = internalNormalize(internalScene.lightDir);
 		for (int i = 0; i < internalObjects.size(); i++)
 		{
 			object_internal& it = internalObjects[i];
 			if (it.isDeleted)
 				continue;
 
-			// Always use the shader 0 for now.
-			GLuint shaderID = internalShaders[0];
-
-			glUseProgram(shaderID);
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, &camProjMatrix[0]);
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, &camViewMatrix[0]);
+			// Only unique uniform for an object is its model matrix
 			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, &it.modelMatrix[0]);
-			glUniform3f(glGetUniformLocation(shaderID, "uLightDir"), normalizedLight[0], normalizedLight[1], normalizedLight[2]);
-			glUniform1i(glGetUniformLocation(shaderID, "uDoLighting"), int(internalScene.doLighting));
-			glUniform1i(glGetUniformLocation(shaderID, "uDrawWireframe"), int(internalScene.drawWireframe));
-			glUniform2f(glGetUniformLocation(shaderID, "uWireframeThickness"), wireframeThicknessX, wireframeThicknessY);
-			glUniform1i(glGetUniformLocation(shaderID, "uShowNormals"), int(internalScene.showNormals));
 
 			glBindVertexArray(it.vao);
 			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
@@ -788,7 +788,7 @@ namespace tinyrender
 		
 		// Guizmo
 		ImGuizmo::BeginFrame();
-		if (internalScene.isGuizmoRendered)
+		if (internalScene.selectedObjectIndex != -1)
 		{
 			ImGuizmo::Enable(true);
 			ImGuizmo::SetOrthographic(false);
@@ -798,7 +798,7 @@ namespace tinyrender
 				camProjMatrix,
 				internalScene.guizmoOp,
 				ImGuizmo::WORLD,
-				internalScene.guizmoMat,
+				internalObjects[internalScene.selectedObjectIndex].modelMatrix,
 				NULL,
 				NULL,
 				NULL,
@@ -816,6 +816,8 @@ namespace tinyrender
 	*/
 	void swap()
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+
 		ImGui::EndFrame();
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -829,6 +831,8 @@ namespace tinyrender
 	*/
 	void terminate()
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+
 		for (int i = 0; i < internalObjects.size(); i++)
 			_internalDeleteObject(i);
 		internalObjects.clear();
@@ -845,6 +849,8 @@ namespace tinyrender
 	*/
 	int addObject(const object& obj)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+
 		object_internal internalObject = _internalCreateObject(obj);
 		int index = _internalGetNextFreeIndex();
 		if (index == internalObjects.size())
@@ -861,6 +867,7 @@ namespace tinyrender
 	*/
 	bool removeObject(int id)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 		assert(id >= 0 && id < internalObjects.size());
 		return _internalDeleteObject(id);
 	}
@@ -875,6 +882,7 @@ namespace tinyrender
 	*/
 	void updateObject(int id, const object& obj)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 		assert(id >= 0 && id < internalObjects.size());
 		_internalUpdateObject(id, obj);
 	}
@@ -887,6 +895,7 @@ namespace tinyrender
 	*/
 	void updateObject(int id, const v3f& position, const v3f& scale)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 		assert(id >= 0 && id < internalObjects.size());
 		object_internal& obj = internalObjects[id];
 		_internalComputeModelMatrix(obj.modelMatrix, position, scale);
@@ -899,6 +908,7 @@ namespace tinyrender
 	*/
 	void updateObject(int id, const std::vector<v3f>& newColors)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 		assert(id >= 0 && id < internalObjects.size());
 		assert(!newColors.empty());
 		_internalUpdateObject(id, newColors);
@@ -997,6 +1007,8 @@ namespace tinyrender
 	*/
 	int addSphere(float r, int n)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+
 		object newObj;
 
 		const int p = 2 * n;
@@ -1085,6 +1097,8 @@ namespace tinyrender
 	*/
 	int addPlane(float size, int n)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+
 		n = n + 1;
 		v3f a({ -size, 0.0f, -size });
 		v3f b({ size, 0.0f, size });
@@ -1136,6 +1150,8 @@ namespace tinyrender
 	*/
 	int addBox(float size)
 	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+
 		object newObj;
 
 		const float r = size / 2.0f;
