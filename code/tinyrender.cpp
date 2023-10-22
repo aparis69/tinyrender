@@ -649,8 +649,8 @@ namespace tinyrender
 			// Scale speed based on distance to the look at point
 			float scale = internalLength(internalScene.at - internalScene.eye);
 			scale = scale > 100.0f ? 100.0f : scale;
-			x *= scale * internalScene.camSpeed * 0.55f;
-			y *= scale * internalScene.camSpeed * 0.55f;
+			x *= scale * internalScene.camSpeed * 0.25f;
+			y *= scale * internalScene.camSpeed * 0.25f;
 			z *= scale * internalScene.camSpeed * 0.025f;
 			xPlane *= scale * internalScene.camSpeed;
 			yPlane *= scale * internalScene.camSpeed;
@@ -690,8 +690,8 @@ namespace tinyrender
 			internalScene.bakedPerspectiveMatrix = perspectiveMatrix(
 				internalScene.zNear, 
 				internalScene.zFar,
-				width_internal,
-				height_internal
+				float(width_internal),
+				float(height_internal)
 			);
 			internalScene.cameraWasChangedInLastframe = false;
 		}
@@ -740,7 +740,7 @@ namespace tinyrender
 		{
 			ImGuizmo::Enable(true);
 			ImGuizmo::SetOrthographic(false);
-			ImGuizmo::SetRect(0, 0, width_internal, height_internal);
+			ImGuizmo::SetRect(0, 0, float(width_internal), float(height_internal));
 			ImGuizmo::Manipulate(
 				internalScene.bakedLookAtMatrix.m,
 				internalScene.bakedPerspectiveMatrix.m,

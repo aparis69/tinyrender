@@ -107,7 +107,7 @@ namespace tinyrender
 		{
 			return m[toIndex1D(i, j)];
 		}
-	};
+	} m4;
 	inline m4 perspectiveMatrix(float zNear, float zFar, float width, float height)
 	{
 		const float tanHalfFovy = tan(toRadian(45.0f) / 2.0f);
