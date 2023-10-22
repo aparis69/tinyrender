@@ -127,6 +127,7 @@ namespace tinyrender
 	int addPlane(float size, int n);
 	int addBox(float size);
 	bool exportObjFile(const char* filename, const object& object);
+	bool loadObjFile(const char* filename, object& object);
 }
 
 #endif

@@ -8,6 +8,9 @@
 #include "../dependency/imgui/backends/imgui_impl_glfw.h"
 #include "../dependency/imgui/backends/imgui_impl_opengl3.h"
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "../dependency/tinyobj/tiny_obj_loader.h"
+
 namespace tinyrender
 {
 	struct object_internal
@@ -1234,6 +1237,79 @@ namespace tinyrender
 				<< '\n';
 		}
 		out.close();
+		return true;
+	}
+
+	/*!
+	\brief Load a mesh .obj file. This function does not add the object
+	to the scene. The object is guaranteed to have vertices, normals, and triangles.
+	\param filename file to load
+	\param object the returned object
+	\return true of the loading was successfull, false otherwise.
+	*/
+	bool loadObjFile(const char* filename, object& obj)
+	{
+		tinyobj::attrib_t attrib;
+		std::vector<tinyobj::shape_t> shapes;
+		std::vector<tinyobj::material_t> materials;
+		std::string warn, err;
+		bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename);
+		if (!err.empty() || !ret)
+		{
+			fprintf(stderr, "Could not load obj file - terminating");
+			fprintf(stderr, err.c_str());
+			return false;
+		}
+
+		// Load the raw obj
+		obj.vertices.resize(attrib.vertices.size() / 3);
+		obj.normals.resize(attrib.vertices.size() / 3);
+		for (size_t s = 0; s < shapes.size(); s++) 
+		{
+			size_t index_offset = 0;
+			for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) 
+			{
+				int fv = shapes[s].mesh.num_face_vertices[f];
+				for (int v = 0; v < fv; v++) 
+				{
+					tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
+					obj.vertices[idx.vertex_index] =
+					{
+						attrib.vertices[3 * idx.vertex_index + 0],
+						attrib.vertices[3 * idx.vertex_index + 1],
+						attrib.vertices[3 * idx.vertex_index + 2]
+					};
+					if (idx.normal_index >= 0)
+					{
+						obj.normals[idx.vertex_index] = {
+							attrib.normals[3 * idx.normal_index + 0],
+							attrib.normals[3 * idx.normal_index + 1],
+							attrib.normals[3 * idx.normal_index + 2]
+						};
+					}
+					obj.triangles.push_back(idx.vertex_index);
+				}
+				index_offset += fv;
+			}
+		}
+
+		// Make sure the loaded object has normals
+		if (attrib.normals.size() == 0)
+		{
+			for (int i = 0; i < obj.triangles.size(); i += 3)
+			{
+				const auto& v0 = obj.vertices[obj.triangles[i + 0]];
+				const auto& v1 = obj.vertices[obj.triangles[i + 1]];
+				const auto& v2 = obj.vertices[obj.triangles[i + 2]];
+				tinyrender::v3f n = tinyrender::internalCross((v1 - v0), (v2 - v0));
+				obj.normals[obj.triangles[i + 0]] += n;
+				obj.normals[obj.triangles[i + 1]] += n;
+				obj.normals[obj.triangles[i + 2]] += n;
+			}
+			for (int i = 0; i < obj.normals.size(); i++)
+				obj.normals[i] = tinyrender::internalNormalize(obj.normals[i]);
+		}
+
 		return true;
 	}
 }
