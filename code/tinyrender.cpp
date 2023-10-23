@@ -16,11 +16,20 @@ namespace tinyrender
 	struct object_internal
 	{
 	public:
+		aabb boundingBox;
 		GLuint vao = 0;
 		GLuint buffers = 0;
 		GLuint triangleBuffer = 0;
 		m4 modelMatrix;
 		int triangleCount = 0;
+		bool isDeleted = false;
+	};
+
+	struct bbox_object_internal
+	{
+		GLuint vao = 0;
+		GLuint buffers = 0;
+		GLuint indexBuffer = 0;
 		bool isDeleted = false;
 	};
 
@@ -52,6 +61,7 @@ namespace tinyrender
 		float lastFrame = 0.0f;
 
 		// Guizmo
+		bool userSelectionInViewportEnabled = true;
 		bool guizmoEnabled = true;
 		ImGuizmo::OPERATION guizmoOp = ImGuizmo::TRANSLATE;
 
@@ -66,6 +76,7 @@ namespace tinyrender
 	static GLFWwindow* windowPtr;
 	static int width_internal, height_internal;
 	static std::vector<object_internal> internalObjects;
+	static std::vector<bbox_object_internal> internalBoxObjects;
 	static std::vector<GLuint> internalShaders;
 	static scene_internal internalScene;
 	static bool initWasCalled = false;
@@ -120,7 +131,7 @@ namespace tinyrender
 
 			internalScene.eye += s * xPlane;
 			internalScene.at += s * xPlane;
-			
+
 			internalScene.cameraWasChangedInLastframe = true;
 		}
 		if (yPlane != 0.0f)
@@ -129,7 +140,7 @@ namespace tinyrender
 
 			internalScene.eye += u * yPlane;
 			internalScene.at += u * yPlane;
-			
+
 			internalScene.cameraWasChangedInLastframe = true;
 		}
 	}
@@ -157,6 +168,218 @@ namespace tinyrender
 	}
 
 	/*!
+	\brief Load all relevant shaders for the application.
+	*/
+	static bool _internalLoadShaders()
+	{
+		GLuint g_ShaderHandle = 0, g_VertHandle = 0, g_FragHandle = 0, g_GeomHandle = 0;
+
+		// Shader 0: base shader for all objects
+		{
+			const GLchar* vertexShaderSource =
+				"#version 330\n"
+				"layout (location = 0) in vec3 vertex;\n"
+				"layout (location = 1) in vec3 normal;\n"
+				"layout (location = 2) in vec3 color;\n"
+				"uniform mat4 uProjection;\n"
+				"uniform mat4 uView;\n"
+				"uniform mat4 uModel;\n"
+				"out vec3 geomPos;\n"
+				"out vec3 geomNormal;\n"
+				"out vec3 geomColor;\n"
+				"void main()\n"
+				"{\n"
+				"	 geomPos = vertex;\n"
+				"    gl_Position = uProjection * uView * uModel * vec4(vertex, 1.0f);\n"
+				"	 geomNormal = normalize(normal);\n"
+				"    geomColor = color;\n"
+				"}\n";
+			const GLchar* geometryShaderSource =
+				"#version 330\n"
+				"layout(triangles) in;\n"
+				"layout(triangle_strip, max_vertices = 3) out;\n"
+				"in vec3 geomPos[];\n"
+				"in vec3 geomNormal[];\n"
+				"in vec3 geomColor[];\n"
+				"uniform vec2 uWireframeThickness;\n"
+				"out vec3 fragPos;\n"
+				"out vec3 fragNormal;\n"
+				"out vec3 fragColor;\n"
+				"out vec3 dist;\n"
+				"void main()\n"
+				"{\n"
+				"	vec2 p0 = uWireframeThickness * gl_in[0].gl_Position.xy / gl_in[0].gl_Position.w;\n"
+				"	vec2 p1 = uWireframeThickness * gl_in[1].gl_Position.xy / gl_in[1].gl_Position.w;\n"
+				"	vec2 p2 = uWireframeThickness * gl_in[2].gl_Position.xy / gl_in[2].gl_Position.w;\n"
+				"	vec2 v0 = p2 - p1;\n"
+				"	vec2 v1 = p2 - p0;;\n"
+				"	vec2 v2 = p1 - p0;;\n"
+				"	float area = abs(v1.x*v2.y - v1.y * v2.x);\n"
+				"	dist = vec3(area / length(v0), 0, 0);\n"
+				"	gl_Position = gl_in[0].gl_Position;\n"
+				"	fragPos = geomPos[0]; fragColor = geomColor[0];  fragNormal = geomNormal[0];\n"
+				"	EmitVertex();\n"
+				"	dist = vec3(0, area / length(v1), 0);\n"
+				"	gl_Position = gl_in[1].gl_Position;\n"
+				"	fragPos = geomPos[1]; fragColor = geomColor[1];  fragNormal = geomNormal[1];\n"
+				"	EmitVertex();\n"
+				"	dist = vec3(0, 0, area / length(v2));\n"
+				"	gl_Position = gl_in[2].gl_Position;\n"
+				"	fragPos = geomPos[2]; fragColor = geomColor[2];  fragNormal = geomNormal[2];\n"
+				"	EmitVertex();\n"
+				"	EndPrimitive();\n"
+				"}\n";
+			const GLchar* fragmentShaderSource =
+				"#version 330\n"
+				"in vec3 fragPos;\n"
+				"in vec3 fragNormal;\n"
+				"in vec3 fragColor;\n"
+				"in vec3 dist;\n"
+				"uniform vec3 uLightDir;\n"
+				"uniform int uDoLighting;\n"
+				"uniform int uDrawWireframe;\n"
+				"uniform int uShowNormals;\n"
+				"out vec4 outFragmentColor;\n"
+				"void main()\n"
+				"{\n"
+				"	 float d = uDoLighting == 1 ? 0.5 * (1.0 + dot(fragNormal, uLightDir)) : 1.0f;\n"
+				"	 vec3 col = fragColor;\n"
+				"	 if (uShowNormals == 1) {\n"
+				"		col = vec3(0.2*(vec3(3.0,3.0,3.0)+2.0*fragNormal));\n"
+				"		d = 1.f\n;"
+				"	 }\n"
+				"	 float w = min(dist[0], min(dist[1], dist[2]));\n"
+				"	 float I = exp2(-1 * w * w);\n"
+				"	 if (uDrawWireframe == 1)\n"
+				"		col = I * vec3(0.1) + (1.0 - I) * col;\n"
+				"	 outFragmentColor = vec4(col * d, 1.0); \n"
+				"}\n";
+			g_VertHandle = glCreateShader(GL_VERTEX_SHADER);
+			glShaderSource(g_VertHandle, 1, &vertexShaderSource, NULL);
+			glCompileShader(g_VertHandle);
+			if (!_internalCheckShader(g_VertHandle, "shader 0 - vertex shader"))
+			{
+				fprintf(stderr, "Error initializing shader 0 vertex shader - terminating");
+				return false;
+			}
+
+			g_GeomHandle = glCreateShader(GL_GEOMETRY_SHADER);
+			glShaderSource(g_GeomHandle, 1, &geometryShaderSource, NULL);
+			glCompileShader(g_GeomHandle);
+			if (!_internalCheckShader(g_GeomHandle, "shader 0 - geometry shader"))
+			{
+				fprintf(stderr, "Error initializing shader 0 geometry shader - terminating");
+				return false;
+			}
+
+			g_FragHandle = glCreateShader(GL_FRAGMENT_SHADER);
+			glShaderSource(g_FragHandle, 1, &fragmentShaderSource, NULL);
+			glCompileShader(g_FragHandle);
+			if (!_internalCheckShader(g_FragHandle, "shader 0 - fragment shader"))
+			{
+				fprintf(stderr, "Error initializing shader 0 fragment shader - terminating");
+				return false;
+			}
+
+			g_ShaderHandle = glCreateProgram();
+			glAttachShader(g_ShaderHandle, g_VertHandle);
+			glAttachShader(g_ShaderHandle, g_GeomHandle);
+			glAttachShader(g_ShaderHandle, g_FragHandle);
+			glLinkProgram(g_ShaderHandle);
+
+			internalShaders.push_back(g_ShaderHandle);
+		}
+
+		// Shader 1: shader for bounding box
+		{
+			const GLchar* vertexShaderSource =
+				"#version 330\n"
+				"layout (location = 0) in vec3 vertex;\n"
+				"uniform mat4 uProjection;\n"
+				"uniform mat4 uView;\n"
+				"uniform mat4 uModel;\n"
+				"void main()\n"
+				"{\n"
+				"    gl_Position = uProjection * uView * uModel * vec4(vertex, 1.0f);\n"
+				"}\n";
+			const GLchar* fragmentShaderSource =
+				"#version 330\n"
+				"out vec4 outFragmentColor;\n"
+				"void main()\n"
+				"{\n"
+				"	 outFragmentColor = vec4(0, 0, 0, 1.0); \n"
+				"}\n";
+			GLuint g_ShaderHandle = 0, g_VertHandle = 0, g_FragHandle = 0, g_GeomHandle = 0;
+			g_VertHandle = glCreateShader(GL_VERTEX_SHADER);
+			glShaderSource(g_VertHandle, 1, &vertexShaderSource, NULL);
+			glCompileShader(g_VertHandle);
+			if (!_internalCheckShader(g_VertHandle, "shader 1 - vertex shader"))
+			{
+				fprintf(stderr, "Error initializing shader 1 vertex shader - terminating");
+				return false;
+			}
+
+			g_FragHandle = glCreateShader(GL_FRAGMENT_SHADER);
+			glShaderSource(g_FragHandle, 1, &fragmentShaderSource, NULL);
+			glCompileShader(g_FragHandle);
+			if (!_internalCheckShader(g_FragHandle, "shader 1 - fragment shader"))
+			{
+				fprintf(stderr, "Error initializing shader 1 fragment shader - terminating");
+				return false;
+			}
+
+			g_ShaderHandle = glCreateProgram();
+			glAttachShader(g_ShaderHandle, g_VertHandle);
+			glAttachShader(g_ShaderHandle, g_FragHandle);
+			glLinkProgram(g_ShaderHandle);
+			internalShaders.push_back(g_ShaderHandle);
+		}
+
+		return true;
+	}
+
+	/*!
+	\brief
+	*/
+	static bbox_object_internal _internalCreateBoxObject(const aabb& box)
+	{
+		bbox_object_internal ret;
+
+		glGenVertexArrays(1, &ret.vao);
+		glGenBuffers(1, &ret.buffers);
+		glGenBuffers(1, &ret.indexBuffer);
+
+		glBindVertexArray(ret.vao);
+
+		// Vertices
+		std::vector<float> vertices;
+		vertices.resize(3 * 8);
+		for (int i = 0; i < 8; i++)
+		{
+			v3f v = box.vertex(i);
+			vertices[(i * 3) + 0] = float(v[0]);
+			vertices[(i * 3) + 1] = float(v[1]);
+			vertices[(i * 3) + 2] = float(v[2]);
+		}
+		glBindBuffer(GL_ARRAY_BUFFER, ret.buffers);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(float) * int(vertices.size()), vertices.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+		glEnableVertexAttribArray(0);
+
+		// Triangles (indexed to match aabb::vertex function)
+		int elements[] = {
+		  0, 1, 3, 2,
+		  4, 5, 7, 6,
+		  0, 4, 5, 1,
+		  2, 6, 7, 3
+		};
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ret.indexBuffer);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(elements), elements, GL_STATIC_DRAW);
+
+		return ret;
+	}
+
+	/*!
 	\brief Create the internal representation of an object. Initialize opengl buffers.
 	\param obj high level object with mesh, color data, and model matrix.
 	*/
@@ -171,6 +394,11 @@ namespace tinyrender
 
 		// Model matrix
 		ImGuizmo::RecomposeMatrixFromComponents(&obj.position.x, &obj.rotation.x, &obj.scale.x, ret.modelMatrix.m);
+
+		// Bounding box
+		ret.boundingBox = computeAABB(obj.vertices);
+		ret.boundingBox = transform(ret.boundingBox, ret.modelMatrix);
+		fixFlatAABB(ret.boundingBox);
 
 		// VAO
 		glGenVertexArrays(1, &ret.vao);
@@ -221,6 +449,11 @@ namespace tinyrender
 
 		// Model matrix
 		ImGuizmo::RecomposeMatrixFromComponents(&newObj.position.x, &newObj.rotation.x, &newObj.scale.x, obj.modelMatrix.m);
+
+		// Bounding box
+		obj.boundingBox = computeAABB(newObj.vertices);
+		obj.boundingBox = transform(obj.boundingBox, obj.modelMatrix);
+		fixFlatAABB(obj.boundingBox);
 
 		glBindVertexArray(obj.vao);
 		glBindBuffer(GL_ARRAY_BUFFER, obj.buffers);
@@ -274,6 +507,14 @@ namespace tinyrender
 		// Objects are not actually removed from the internal vector, but flagged as deleted.
 		// This is to ensure indices of existing objects will not change from the API point of view.
 		obj.isDeleted = true;
+
+		// Destroy bbox
+		bbox_object_internal& boxObj = internalBoxObjects[index];
+		assert(boxObj.isDeleted == false);
+		glDeleteBuffers(1, &boxObj.buffers);
+		glDeleteBuffers(1, &boxObj.indexBuffer);
+		glDeleteVertexArrays(1, &boxObj.vao);
+		boxObj.isDeleted = true;
 
 		return true;
 	}
@@ -335,7 +576,7 @@ namespace tinyrender
 			ImGui::Spacing(); ImGui::Spacing();
 			ImGui::Separator();
 			ImGui::Text("Camera");
-			{	
+			{
 				ImGui::Text("Eye (%.3f, %.3f, %.3f)", internalScene.eye.x, internalScene.eye.y, internalScene.eye.z);
 				ImGui::Text("At (%.3f, %.3f, %.3f)", internalScene.at.x, internalScene.at.y, internalScene.at.z);
 				ImGui::Text("Up (%.3f, %.3f, %.3f)", internalScene.up.x, internalScene.up.y, internalScene.up.z);
@@ -358,6 +599,14 @@ namespace tinyrender
 			}
 		}
 		ImGui::End();
+	}
+
+	/*!
+	\brief
+	*/
+	static void _intersectSceneObject()
+	{
+
 	}
 
 	/*!
@@ -393,7 +642,15 @@ namespace tinyrender
 			// In the scene (only when a single click with no move as been done).
 			// See code below after "if (button == GLFW_MOUSE_BUTTON_LEFT)"
 			if (internalScene.currentMouseButton == GLFW_MOUSE_BUTTON_LEFT)
+			{
 				internalScene.mousePositionAtClickStart = getMousePosition();
+
+				// Check if the user selected something
+				if (internalScene.userSelectionInViewportEnabled)
+				{
+
+				}
+			}
 		}
 		else if (action == GLFW_RELEASE)
 		{
@@ -524,118 +781,8 @@ namespace tinyrender
 		}
 
 		// Shaders
-		const GLchar* vertexShaderSource =
-			"#version 330\n"
-			"layout (location = 0) in vec3 vertex;\n"
-			"layout (location = 1) in vec3 normal;\n"
-			"layout (location = 2) in vec3 color;\n"
-			"uniform mat4 uProjection;\n"
-			"uniform mat4 uView;\n"
-			"uniform mat4 uModel;\n"
-			"out vec3 geomPos;\n"
-			"out vec3 geomNormal;\n"
-			"out vec3 geomColor;\n"
-			"void main()\n"
-			"{\n"
-			"	 geomPos = vertex;\n"
-			"    gl_Position = uProjection * uView * uModel * vec4(vertex, 1.0f);\n"
-			"	 geomNormal = normalize(normal);\n"
-			"    geomColor = color;\n"
-			"}\n";
-		const GLchar* geometryShaderSource =
-			"#version 330\n"
-			"layout(triangles) in;\n"
-			"layout(triangle_strip, max_vertices = 3) out;\n"
-			"in vec3 geomPos[];\n"
-			"in vec3 geomNormal[];\n"
-			"in vec3 geomColor[];\n"
-			"uniform vec2 uWireframeThickness;\n"
-			"out vec3 fragPos;\n"
-			"out vec3 fragNormal;\n"
-			"out vec3 fragColor;\n"
-			"out vec3 dist;\n"
-			"void main()\n"
-			"{\n"
-			"	vec2 p0 = uWireframeThickness * gl_in[0].gl_Position.xy / gl_in[0].gl_Position.w;\n"
-			"	vec2 p1 = uWireframeThickness * gl_in[1].gl_Position.xy / gl_in[1].gl_Position.w;\n"
-			"	vec2 p2 = uWireframeThickness * gl_in[2].gl_Position.xy / gl_in[2].gl_Position.w;\n"
-			"	vec2 v0 = p2 - p1;\n"
-			"	vec2 v1 = p2 - p0;;\n"
-			"	vec2 v2 = p1 - p0;;\n"
-			"	float area = abs(v1.x*v2.y - v1.y * v2.x);\n"
-			"	dist = vec3(area / length(v0), 0, 0);\n"
-			"	gl_Position = gl_in[0].gl_Position;\n"
-			"	fragPos = geomPos[0]; fragColor = geomColor[0];  fragNormal = geomNormal[0];\n"
-			"	EmitVertex();\n"
-			"	dist = vec3(0, area / length(v1), 0);\n"
-			"	gl_Position = gl_in[1].gl_Position;\n"
-			"	fragPos = geomPos[1]; fragColor = geomColor[1];  fragNormal = geomNormal[1];\n"
-			"	EmitVertex();\n"
-			"	dist = vec3(0, 0, area / length(v2));\n"
-			"	gl_Position = gl_in[2].gl_Position;\n"
-			"	fragPos = geomPos[2]; fragColor = geomColor[2];  fragNormal = geomNormal[2];\n"
-			"	EmitVertex();\n"
-			"	EndPrimitive();\n"
-			"}\n";
-		const GLchar* fragmentShaderSource =
-			"#version 330\n"
-			"in vec3 fragPos;\n"
-			"in vec3 fragNormal;\n"
-			"in vec3 fragColor;\n"
-			"in vec3 dist;\n"
-			"uniform vec3 uLightDir;\n"
-			"uniform int uDoLighting;\n"
-			"uniform int uDrawWireframe;\n"
-			"uniform int uShowNormals;\n"
-			"out vec4 outFragmentColor;\n"
-			"void main()\n"
-			"{\n"
-			"	 float d = uDoLighting == 1 ? 0.5 * (1.0 + dot(fragNormal, uLightDir)) : 1.0f;\n"
-			"	 vec3 col = fragColor;\n"
-			"	 if (uShowNormals == 1) {\n"
-			"		col = vec3(0.2*(vec3(3.0,3.0,3.0)+2.0*fragNormal));\n"
-			"		d = 1.f\n;"
-			"	 }\n"
-			"	 float w = min(dist[0], min(dist[1], dist[2]));\n"
-			"	 float I = exp2(-1 * w * w);\n"
-			"	 if (uDrawWireframe == 1)\n"
-			"		col = I * vec3(0.1) + (1.0 - I) * col;\n"
-			"	 outFragmentColor = vec4(col * d, 1.0); \n"
-			"}\n";
-		GLuint g_ShaderHandle = 0, g_VertHandle = 0, g_FragHandle = 0, g_GeomHandle = 0;
-		g_VertHandle = glCreateShader(GL_VERTEX_SHADER);
-		glShaderSource(g_VertHandle, 1, &vertexShaderSource, NULL);
-		glCompileShader(g_VertHandle);
-		if (!_internalCheckShader(g_VertHandle, "vertex shader"))
-		{
-			fprintf(stderr, "Error initializing vertex shader - terminating");
-			return;
-		}
-
-		g_GeomHandle = glCreateShader(GL_GEOMETRY_SHADER);
-		glShaderSource(g_GeomHandle, 1, &geometryShaderSource, NULL);
-		glCompileShader(g_GeomHandle);
-		if (!_internalCheckShader(g_GeomHandle, "geometry shader"))
-		{
-			fprintf(stderr, "Error initializing geometry shader - terminating");
-			return;
-		}
-
-		g_FragHandle = glCreateShader(GL_FRAGMENT_SHADER);
-		glShaderSource(g_FragHandle, 1, &fragmentShaderSource, NULL);
-		glCompileShader(g_FragHandle);
-		if (!_internalCheckShader(g_FragHandle, "fragment shader"))
-		{
-			fprintf(stderr, "Error initializing fragment shader - terminating");
-			return;
-		}
-
-		g_ShaderHandle = glCreateProgram();
-		glAttachShader(g_ShaderHandle, g_VertHandle);
-		glAttachShader(g_ShaderHandle, g_GeomHandle);
-		glAttachShader(g_ShaderHandle, g_FragHandle);
-		glLinkProgram(g_ShaderHandle);
-		internalShaders.push_back(g_ShaderHandle);
+		bool shadersLoaded = _internalLoadShaders();
+		assert(shadersLoaded);
 
 		// Imgui
 		IMGUI_CHECKVERSION();
@@ -749,7 +896,7 @@ namespace tinyrender
 				internalScene.at
 			);
 			internalScene.bakedPerspectiveMatrix = perspectiveMatrix(
-				internalScene.zNear, 
+				internalScene.zNear,
 				internalScene.zFar,
 				float(width_internal),
 				float(height_internal)
@@ -785,19 +932,45 @@ namespace tinyrender
 			// Only unique uniform for an object is its model matrix
 			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, it.modelMatrix.m);
 
+			// Render object
 			glBindVertexArray(it.vao);
 			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
 		}
+
+		// Render bounding boxes
+		shaderID = internalShaders[1];
+		glUseProgram(shaderID);
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, internalScene.bakedPerspectiveMatrix.m);
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, internalScene.bakedLookAtMatrix.m);
+		glLineWidth(internalScene.wireframeThickness);
+		for (int i = 0; i < internalBoxObjects.size(); i++)
+		{
+			bbox_object_internal& it = internalBoxObjects[i];
+			if (it.isDeleted)
+				continue;
+
+			// Model matrix come from the actual object, not the bounding box.
+			const float* modelMatrix = internalObjects[i].modelMatrix.m;
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, modelMatrix);
+
+			glBindVertexArray(it.vao);
+			glDrawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_INT, 0);
+			glDrawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_INT, (GLvoid*)(4 * sizeof(int)));
+			glDrawElements(GL_LINES, 8, GL_UNSIGNED_INT, (GLvoid*)(8 * sizeof(int)));
+		}
+		glLineWidth(1.0f); // Reset to default value to not interfer with other things
 
 		// Prepare imgui/imguizmo frames
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
 		internalScene.isMouseOverGui = ImGui::GetIO().WantCaptureMouse;
-		
+
 		// Guizmo
 		if (internalScene.selectedObjectIndex != -1 && internalScene.guizmoEnabled)
 		{
+			object_internal& selectedObject = internalObjects[internalScene.selectedObjectIndex];
+
 			ImGuizmo::BeginFrame();
 			ImGuizmo::Enable(true);
 			ImGuizmo::SetOrthographic(false);
@@ -807,12 +980,15 @@ namespace tinyrender
 				internalScene.bakedPerspectiveMatrix.m,
 				internalScene.guizmoOp,
 				ImGuizmo::WORLD,
-				internalObjects[internalScene.selectedObjectIndex].modelMatrix.m,
+				selectedObject.modelMatrix.m,
 				NULL,
 				NULL,
 				NULL,
 				NULL
 			);
+
+			// TODO(Axel): To check, maybe apply the deltaMatrix from Manipulate() instead.
+			selectedObject.boundingBox = transform(selectedObject.boundingBox, selectedObject.modelMatrix);
 		}
 
 		// Internal gui and guizmo rendering
@@ -870,12 +1046,21 @@ namespace tinyrender
 	{
 		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 
+		// Object
 		object_internal internalObject = _internalCreateObject(obj);
 		int index = _internalGetNextFreeIndex();
 		if (index == internalObjects.size())
 			internalObjects.push_back(internalObject);
 		else
 			internalObjects[index] = internalObject;
+
+		// Bounding box
+		bbox_object_internal internalBox = _internalCreateBoxObject(internalObject.boundingBox);
+		if (index == internalBoxObjects.size())
+			internalBoxObjects.push_back(internalBox);
+		else
+			internalBoxObjects[index] = internalBox;
+
 		return index;
 	}
 
@@ -918,6 +1103,7 @@ namespace tinyrender
 		assert(id >= 0 && id < internalObjects.size());
 		object_internal& obj = internalObjects[id];
 		ImGuizmo::RecomposeMatrixFromComponents(&position.x, &rotation.x, &scale.x, obj.modelMatrix.m);
+		obj.boundingBox = transform(obj.boundingBox, obj.modelMatrix);
 	}
 
 	/*!
@@ -931,6 +1117,17 @@ namespace tinyrender
 		assert(id >= 0 && id < internalObjects.size());
 		assert(!newColors.empty());
 		_internalUpdateObject(id, newColors);
+	}
+
+	/*!
+	\brief Get the bounding box of an existing object.
+	\param id object id
+	*/
+	aabb getBoundingBox(int id)
+	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+		assert(id >= 0 && id < internalObjects.size());
+		return internalObjects[id].boundingBox;
 	}
 
 
@@ -1169,55 +1366,65 @@ namespace tinyrender
 	*/
 	int addBox(float size)
 	{
+		const float r = size / 2.0f;
+		return addBox({ -r, -r, -r }, { r, r, r });
+	}
+
+	/*!
+	\brief Creates a AABB object at the given world space coordinates.
+	The cube is actually made of 6 quads each with their own vertices and normals.
+	\param a, b coordinates
+	\return the id of the new box object
+	*/
+	int addBox(const v3f& a, const v3f& b)
+	{
 		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 
 		object newObj;
 
-		const float r = size / 2.0f;
-
 		// x negative
-		newObj.vertices.push_back({ -r, -r, -r }); newObj.vertices.push_back({ -r, r, -r });
-		newObj.vertices.push_back({ -r, r, r }); newObj.vertices.push_back({ -r, -r, r });
+		newObj.vertices.push_back({ a.x, a.y, a.z }); newObj.vertices.push_back({ a.x, b.y, a.z });
+		newObj.vertices.push_back({ a.x, b.y, b.z }); newObj.vertices.push_back({ a.x, a.y, b.z });
 		newObj.normals.push_back({ -1, 0, 0 });	newObj.normals.push_back({ -1, 0, 0 });
 		newObj.normals.push_back({ -1, 0, 0 });	newObj.normals.push_back({ -1, 0, 0 });
 		newObj.triangles.push_back(0); newObj.triangles.push_back(1); newObj.triangles.push_back(2);
 		newObj.triangles.push_back(0); newObj.triangles.push_back(2); newObj.triangles.push_back(3);
 
 		// x positive
-		newObj.vertices.push_back({ r, -r, -r }); newObj.vertices.push_back({ r, r, -r });
-		newObj.vertices.push_back({ r, r, r }); newObj.vertices.push_back({ r, -r, r });
+		newObj.vertices.push_back({ b.x, a.y, a.z }); newObj.vertices.push_back({ b.x, b.y, a.z });
+		newObj.vertices.push_back({ b.x, b.y, b.z }); newObj.vertices.push_back({ b.x, a.y, b.z });
 		newObj.normals.push_back({ 1, 0, 0 });	newObj.normals.push_back({ 1, 0, 0 });
 		newObj.normals.push_back({ 1, 0, 0 });	newObj.normals.push_back({ 1, 0, 0 });
 		newObj.triangles.push_back(4); newObj.triangles.push_back(5); newObj.triangles.push_back(6);
 		newObj.triangles.push_back(4); newObj.triangles.push_back(6); newObj.triangles.push_back(7);
 
 		// y negative
-		newObj.vertices.push_back({ -r, -r, -r }); newObj.vertices.push_back({ -r, -r, r });
-		newObj.vertices.push_back({ r, -r, r }); newObj.vertices.push_back({ r, -r, -r });
+		newObj.vertices.push_back({ a.x, a.y, a.z }); newObj.vertices.push_back({ a.x, a.y, b.z });
+		newObj.vertices.push_back({ b.x, a.y, b.z }); newObj.vertices.push_back({ b.x, a.y, a.z });
 		newObj.normals.push_back({ 0, -1, 0 });	newObj.normals.push_back({ 0, -1, 0 });
 		newObj.normals.push_back({ 0, -1, 0 });	newObj.normals.push_back({ 0, -1, 0 });
 		newObj.triangles.push_back(8); newObj.triangles.push_back(9); newObj.triangles.push_back(10);
 		newObj.triangles.push_back(8); newObj.triangles.push_back(10); newObj.triangles.push_back(11);
 
 		// y positive
-		newObj.vertices.push_back({ -r, r, -r }); newObj.vertices.push_back({ -r, r, r });
-		newObj.vertices.push_back({ r, r, r }); newObj.vertices.push_back({ r, r, -r });
+		newObj.vertices.push_back({ a.x, b.y, a.z }); newObj.vertices.push_back({ a.x, b.y, b.z });
+		newObj.vertices.push_back({ b.x, b.y, b.z }); newObj.vertices.push_back({ b.x, b.y, a.z });
 		newObj.normals.push_back({ 0, 1, 0 });	newObj.normals.push_back({ 0, 1, 0 });
 		newObj.normals.push_back({ 0, 1, 0 });	newObj.normals.push_back({ 0, 1, 0 });
 		newObj.triangles.push_back(12); newObj.triangles.push_back(13); newObj.triangles.push_back(14);
 		newObj.triangles.push_back(12); newObj.triangles.push_back(14); newObj.triangles.push_back(15);
 
 		// z negative
-		newObj.vertices.push_back({ -r, -r, -r }); newObj.vertices.push_back({ -r, r, -r });
-		newObj.vertices.push_back({ r, r, -r }); newObj.vertices.push_back({ r, -r, -r });
+		newObj.vertices.push_back({ a.x, a.y, a.z }); newObj.vertices.push_back({ a.x, b.y, a.z });
+		newObj.vertices.push_back({ b.x, b.y, a.z }); newObj.vertices.push_back({ b.x, a.y, a.z });
 		newObj.normals.push_back({ 0, 0, -1 });	newObj.normals.push_back({ 0, 0, -1 });
 		newObj.normals.push_back({ 0, 0, -1 });	newObj.normals.push_back({ 0, 0, -1 });
 		newObj.triangles.push_back(16); newObj.triangles.push_back(17); newObj.triangles.push_back(18);
 		newObj.triangles.push_back(16); newObj.triangles.push_back(18); newObj.triangles.push_back(19);
 
 		// z positive
-		newObj.vertices.push_back({ -r, -r, r }); newObj.vertices.push_back({ -r, r, r });
-		newObj.vertices.push_back({ r, r, r }); newObj.vertices.push_back({ r, -r, r });
+		newObj.vertices.push_back({ a.x, a.y, b.z }); newObj.vertices.push_back({ a.x, b.y, b.z });
+		newObj.vertices.push_back({ b.x, b.y, b.z }); newObj.vertices.push_back({ b.x, a.y, b.z });
 		newObj.normals.push_back({ 0, 0, 1 });	newObj.normals.push_back({ 0, 0, 1 });
 		newObj.normals.push_back({ 0, 0, 1 });	newObj.normals.push_back({ 0, 0, 1 });
 		newObj.triangles.push_back(20); newObj.triangles.push_back(21); newObj.triangles.push_back(22);
@@ -1280,13 +1487,13 @@ namespace tinyrender
 		// Load the raw obj
 		obj.vertices.resize(attrib.vertices.size() / 3);
 		obj.normals.resize(attrib.vertices.size() / 3);
-		for (size_t s = 0; s < shapes.size(); s++) 
+		for (size_t s = 0; s < shapes.size(); s++)
 		{
 			size_t index_offset = 0;
-			for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) 
+			for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++)
 			{
 				int fv = shapes[s].mesh.num_face_vertices[f];
-				for (int v = 0; v < fv; v++) 
+				for (int v = 0; v < fv; v++)
 				{
 					tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
 					obj.vertices[idx.vertex_index] =

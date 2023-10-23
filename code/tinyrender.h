@@ -11,7 +11,19 @@
 
 namespace tinyrender
 {
-	// Minimalist quick and dirty math. Not here for completeness.
+	// Minimalist quick & dirty maths. Not here for completeness.
+	template<typename T>
+	inline T min(const T& a, const T& b)
+	{
+		return a < b ? a : b;
+	}
+
+	template<typename T>
+	inline T max(const T& a, const T& b)
+	{
+		return a > b ? a : b;
+	}
+
 	typedef struct v2f
 	{
 	public:
@@ -21,7 +33,7 @@ namespace tinyrender
 			struct { float x, y; };
 		};
 	} v2f;
-	inline float internalLength2(const v2f v) 
+	inline float internalLength2(const v2f v)
 	{
 		return v.x * v.x + v.y * v.y;
 	}
@@ -53,7 +65,14 @@ namespace tinyrender
 			return v[i];
 		}
 	} v3f;
-
+	inline v3f min(const v3f& a, const v3f& b)
+	{
+		return { min(a.x, b.x), min(a.y, b.y), min(a.z, b.z) };
+	}
+	inline v3f max(const v3f& a, const v3f& b)
+	{
+		return { max(a.x, b.x), max(a.y, b.y), max(a.z, b.z) };
+	}
 	inline float internalLength2(const v3f& v)
 	{
 		return v.x * v.x + v.y * v.y + v.z * v.z;
@@ -99,6 +118,29 @@ namespace tinyrender
 	{
 		return degrees * static_cast<float>(0.01745329251994329576923690768489);
 	}
+
+	typedef struct v4f
+	{
+		union
+		{
+			float v[4];
+			struct { float x, y, z, w; };
+		};
+		inline v4f& operator+=(const v4f& r)
+		{
+			x += r.x; y += r.y; z += r.z; w += r.w;
+			return *this;
+		}
+		inline v4f& operator/=(float r)
+		{
+			x /= r; y /= r; z /= r; w /= r;
+			return *this;
+		}
+		inline float& operator[](int i)
+		{
+			return v[i];
+		}
+	} v4f;
 
 	typedef struct m4
 	{
@@ -163,6 +205,56 @@ namespace tinyrender
 
 		return mat;
 	}
+	inline v4f operator*(const v4f& v, const m4& mat)
+	{
+		v4f out;
+		out.x = v.x * mat(0, 0) + v.y * mat(1, 0) + v.z * mat(2, 0) + v.w * mat(3, 0);
+		out.y = v.x * mat(0, 1) + v.y * mat(1, 1) + v.z * mat(2, 1) + v.w * mat(3, 1);
+		out.z = v.x * mat(0, 2) + v.y * mat(1, 2) + v.z * mat(2, 2) + v.w * mat(3, 2);
+		out.w = v.x * mat(0, 3) + v.y * mat(1, 3) + v.z * mat(2, 3) + v.w * mat(3, 3);
+		return out;
+	}
+
+	typedef struct aabb
+	{
+	public:
+		v3f a, b;
+
+		inline v3f vertex(int k) const
+		{
+			return { (k & 1) ? b.x : a.x, (k & 2) ? b.y : a.y, (k & 4) ? b.z : a.z };
+		}
+	} aabb;
+	inline aabb computeAABB(const std::vector<v3f>& pts)
+	{
+		aabb ret =
+		{	{ 100000.0f, 100000.0f, 100000.0f },
+			{ -100000.0f, -100000.0f, -100000.0f }
+		};
+		for (const v3f& p : pts)
+		{
+			ret.a = min(ret.a, p);
+			ret.b = max(ret.b, p);
+		}
+		return ret;
+	}
+	inline aabb transform(const aabb& box, const m4& mat)
+	{
+		v4f a = v4f({ box.a.x, box.a.y, box.a.z, 1.0f }) * mat;
+		v4f b = v4f({ box.b.x, box.b.y, box.b.z, 1.0f }) * mat;
+		return { { a.x, a.y, a.z }, { b.x, b.y, b.z } };
+	}
+	inline void fixFlatAABB(aabb& box)
+	{
+		for (int i = 0; i < 3; i++)
+		{
+			if (box.a[i] == box.b[i])
+			{
+				box.a[i] -= 0.1f;
+				box.b[i] += 0.1f;
+			}
+		}
+	}
 
 	// Public interface
 	struct object
@@ -196,6 +288,7 @@ namespace tinyrender
 	void updateObject(int id, const object& obj);
 	void updateObject(int id, const v3f& position, const v3f& rotation, const v3f& scale);
 	void updateObject(int id, const std::vector<v3f>& newColors);
+	aabb getBoundingBox(int id);
 
 	// Scene parameters
 	void setGuizmoEnabled(bool enabled);
@@ -212,6 +305,7 @@ namespace tinyrender
 	int addSphere(float r, int n);
 	int addPlane(float size, int n);
 	int addBox(float size);
+	int addBox(const v3f& a, const v3f& b);
 	bool exportObjFile(const char* filename, const object& object);
 	bool loadObjFile(const char* filename, object& object);
 }
