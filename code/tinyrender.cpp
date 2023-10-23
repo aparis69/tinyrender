@@ -44,6 +44,7 @@ namespace tinyrender
 		float mouseLastY = 0.0f;
 		bool isMouseOverGui = false;
 		int selectedObjectIndex = -1;
+		int currentMouseButton = -1;
 
 		// Frame timers
 		float deltaTime = 0.0f;
@@ -357,6 +358,101 @@ namespace tinyrender
 		ImGui::End();
 	}
 
+	/*!
+	\brief Callback for mouse button events.
+	\param window glfw window pointer
+	\param w new window width
+	\param h new window height
+	*/
+	static void _internalWindowResizeCallback(GLFWwindow* window, int w, int h)
+	{
+		glViewport(0, 0, w, h);
+		width_internal = w;
+		height_internal = h;
+		internalScene.cameraWasChangedInLastframe = true;
+	}
+
+	/*!
+	\brief Callback for mouse button events. See https://www.glfw.org/docs/3.3/input_guide.html#input_mouse_button
+	for more information.
+	\param window glfw window pointer
+	\param button the modified button
+	\param action GLFW_PRESS or GLFW_RELEASE
+	\param mods current modifiers pressed
+	*/
+	static void _internalMouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
+	{
+		if (action == GLFW_PRESS)
+		{
+			internalScene.currentMouseButton = button;
+		}
+		else if (action == GLFW_RELEASE)
+		{
+			internalScene.currentMouseButton = -1;
+			if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
+				internalScene.selectedObjectIndex = -1;
+		}
+	}
+
+	/*!
+	\brief Callback for mouse scrolling. See https://www.glfw.org/docs/3.3/input_guide.html#scrolling
+	for more information.
+	\param window glfw window pointer
+	\param x, y scroll motion. Only the y parameter is relevant as scroll is vertical.
+	*/
+	static void _internalScrollCallback(GLFWwindow* window, double x, double y)
+	{
+		_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
+	}
+
+	/*!
+	\brief Callback for key events. See https://www.glfw.org/docs/3.3/input_guide.html#input_key
+	for more information.
+	\param window glfw window pointer
+	\param key the modified key
+	\param scancode platform specific scancode.
+	\param action GLFW_PRESS, GLFW_REPEAT or GLFW_RELEASE.
+	\param mods current modifiers pressed
+	*/
+	static void _internalKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+	{
+		if (action == GLFW_PRESS)
+		{
+			float x = 0.0f, y = 0.0f, z = 0.0f;
+
+			// Scene management
+			if (key == GLFW_KEY_DELETE)
+			{
+				bool success = _internalTryDeleteObject(internalScene.selectedObjectIndex);
+				if (success)
+					internalScene.selectedObjectIndex = -1;
+			}
+			// Guizmo shortcut
+			else if (key == GLFW_KEY_T)
+				internalScene.guizmoOp = ImGuizmo::TRANSLATE;
+			else if (key == GLFW_KEY_R)
+				internalScene.guizmoOp = ImGuizmo::ROTATE;
+			else if (getKey(GLFW_KEY_S))
+				internalScene.guizmoOp = ImGuizmo::SCALE;
+			// Keyboard	
+			else if (key == GLFW_KEY_LEFT)
+				x -= 0.1f;
+			else if (key == GLFW_KEY_RIGHT)
+				x += 0.1f;
+			else if (key == GLFW_KEY_UP)
+				y += 0.1f;
+			else if (key == GLFW_KEY_DOWN)
+				y -= 0.1f;
+			else if (key == GLFW_KEY_PAGE_UP)
+				z += 0.1f;
+			else if (key == GLFW_KEY_PAGE_DOWN)
+				z -= 0.1f;
+
+			if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
+				_internalCameraMove(x, y, z, 0.0f, 0.0f); // No panning here
+		}
+	}
+
 
 	/*!
 	\brief Init a window sized (width, height) with a given name.
@@ -394,18 +490,13 @@ namespace tinyrender
 		glfwMakeContextCurrent(windowPtr);
 		glfwShowWindow(windowPtr);
 		glfwSwapInterval(1);
+
+		// Inputs and callbacks
 		glfwSetInputMode(windowPtr, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-		glfwSetWindowSizeCallback(windowPtr, [](GLFWwindow* win, int w, int h)
-		{
-			glViewport(0, 0, w, h);
-			width_internal = w;
-			height_internal = h;
-			internalScene.cameraWasChangedInLastframe = true;
-		});
-		glfwSetScrollCallback(windowPtr, [](GLFWwindow* win, double x, double y)
-		{
-			_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
-		});
+		glfwSetWindowSizeCallback(windowPtr, _internalWindowResizeCallback);
+		glfwSetScrollCallback(windowPtr, _internalScrollCallback);
+		glfwSetKeyCallback(windowPtr, _internalKeyCallback);
+		glfwSetMouseButtonCallback(windowPtr, _internalMouseButtonCallback);
 
 		// OpenGL
 		glewInit();
@@ -586,87 +677,43 @@ namespace tinyrender
 		internalScene.deltaTime = currentFrame - internalScene.lastFrame;
 		internalScene.lastFrame = currentFrame;
 
-		// Scene management shortcut
+		// Camera motion through mouse
+		double xpos, ypos;
+		glfwGetCursorPos(windowPtr, &xpos, &ypos);
+		float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;
+		if (internalScene.currentMouseButton == GLFW_MOUSE_BUTTON_LEFT)
 		{
-			// Object deletion
-			if (getKey(GLFW_KEY_DELETE))
-			{
-				bool success = _internalTryDeleteObject(internalScene.selectedObjectIndex);
-				if (success)
-					internalScene.selectedObjectIndex = -1;
-			}
+			float xoffset = float(xpos) - internalScene.mouseLastX;
+
+			// Reversed since y-coordinates go from bottom to top
+			float yoffset = internalScene.mouseLastY - float(ypos);
+			x += (xoffset * internalScene.mouseSensitivity);
+			y += (yoffset * internalScene.mouseSensitivity);
+		}
+		else if (internalScene.currentMouseButton == GLFW_MOUSE_BUTTON_MIDDLE)
+		{
+			float xoffset = float(xpos) - internalScene.mouseLastX;
+			float yoffset = float(ypos) - internalScene.mouseLastY;
+			xPlane += (xoffset * internalScene.mouseSensitivity);
+			yPlane += (yoffset * internalScene.mouseSensitivity);
 		}
 
-		// Guizmo keyboard shortcut
-		if (getKey(GLFW_KEY_T))
-			internalScene.guizmoOp = ImGuizmo::TRANSLATE;
-		if (getKey(GLFW_KEY_R))
-			internalScene.guizmoOp = ImGuizmo::ROTATE;
-		if (getKey(GLFW_KEY_S))
-			internalScene.guizmoOp = ImGuizmo::SCALE;
+		// Scale speed based on distance to the look at point
+		float scale = internalLength(internalScene.at - internalScene.eye);
+		scale = scale > 100.0f ? 100.0f : scale;
+		x *= scale * internalScene.camSpeed * 0.25f;
+		y *= scale * internalScene.camSpeed * 0.25f;
+		z *= scale * internalScene.camSpeed * 0.025f;
+		xPlane *= scale * internalScene.camSpeed;
+		yPlane *= scale * internalScene.camSpeed;
 
-		// Camera movements
-		{
-			// Keyboard	
-			float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;
-			if (getKey(GLFW_KEY_LEFT))
-				x -= 0.1f;
-			if (getKey(GLFW_KEY_RIGHT))
-				x += 0.1f;
-			if (getKey(GLFW_KEY_UP))
-				y += 0.1f;
-			if (getKey(GLFW_KEY_DOWN))
-				y -= 0.1f;
-			if (getKey(GLFW_KEY_PAGE_UP))
-				z += 0.1f;
-			if (getKey(GLFW_KEY_PAGE_DOWN))
-				z -= 0.1f;
+		// Apply everything
+		if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
+			_internalCameraMove(x, y, z, xPlane, yPlane);
 
-			// Mouse
-			bool userHasReleased = false;
-			double xpos, ypos;
-			glfwGetCursorPos(windowPtr, &xpos, &ypos);
-			int state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_LEFT);
-			if (state == GLFW_PRESS)
-			{
-				float xoffset = float(xpos) - internalScene.mouseLastX;
-
-				// Reversed since y-coordinates go from bottom to top
-				float yoffset = internalScene.mouseLastY - float(ypos);
-				x += (xoffset * internalScene.mouseSensitivity);
-				y += (yoffset * internalScene.mouseSensitivity);
-			}
-
-			state = glfwGetMouseButton(windowPtr, GLFW_MOUSE_BUTTON_MIDDLE);
-			if (state == GLFW_PRESS)
-			{
-				float xoffset = float(xpos) - internalScene.mouseLastX;
-				float yoffset = float(ypos) - internalScene.mouseLastY;
-				xPlane += (xoffset * internalScene.mouseSensitivity);
-				yPlane += (yoffset * internalScene.mouseSensitivity);
-			}
-
-			// Scale speed based on distance to the look at point
-			float scale = internalLength(internalScene.at - internalScene.eye);
-			scale = scale > 100.0f ? 100.0f : scale;
-			x *= scale * internalScene.camSpeed * 0.25f;
-			y *= scale * internalScene.camSpeed * 0.25f;
-			z *= scale * internalScene.camSpeed * 0.025f;
-			xPlane *= scale * internalScene.camSpeed;
-			yPlane *= scale * internalScene.camSpeed;
-
-			// Apply everything
-			if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
-				_internalCameraMove(x, y, z, xPlane, yPlane);
-
-			// Store last mouse pos
-			internalScene.mouseLastX = float(xpos);
-			internalScene.mouseLastY = float(ypos);
-
-			// Reset user selection if he clicks in the 3D scene but not on a guizmo
-			if (userHasReleased && !ImGuizmo::IsUsing())
-				internalScene.selectedObjectIndex = -1;
-		}
+		// Store last mouse pos
+		internalScene.mouseLastX = float(xpos);
+		internalScene.mouseLastY = float(ypos);
 	}
 
 	/*!
