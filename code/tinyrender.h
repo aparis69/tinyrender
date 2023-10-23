@@ -11,6 +11,25 @@
 
 namespace tinyrender
 {
+	// Minimalist quick and dirty math. Not here for completeness.
+	typedef struct v2f
+	{
+	public:
+		union
+		{
+			float v[2];
+			struct { float x, y; };
+		};
+	} v2f;
+	inline float internalLength2(const v2f v) 
+	{
+		return v.x * v.x + v.y * v.y;
+	}
+	inline v2f operator-(const v2f& l, const v2f r)
+	{
+		return { l.x - r.x, l.y - r.y };
+	}
+
 	typedef struct v3f
 	{
 	public:
@@ -113,8 +132,8 @@ namespace tinyrender
 		const float tanHalfFovy = tan(toRadian(45.0f) / 2.0f);
 
 		m4 mat;
-		mat(0, 0) = 1.0f / (((float)width) / ((float)height) * tanHalfFovy);
-		mat(1, 1) = 1.0f / (tanHalfFovy);
+		mat(0, 0) = 1.0f / (width / height * tanHalfFovy);
+		mat(1, 1) = 1.0f / tanHalfFovy;
 		mat(2, 2) = -(zFar + zNear) / (zFar - zNear);
 		mat(2, 3) = -1.0f;
 		mat(3, 2) = -(2.0f * zFar * zNear) / (zFar - zNear);
@@ -169,6 +188,7 @@ namespace tinyrender
 	void render();
 	void swap();
 	void terminate();
+	v2f getMousePosition();
 
 	// Object management
 	int addObject(const object& obj);
@@ -178,6 +198,7 @@ namespace tinyrender
 	void updateObject(int id, const std::vector<v3f>& newColors);
 
 	// Scene parameters
+	void setGuizmoEnabled(bool enabled);
 	void setDoLighting(bool doLighting);
 	void setDrawWireframe(bool drawWireframe);
 	void setWireframeThickness(float thickness);

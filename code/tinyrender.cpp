@@ -45,12 +45,14 @@ namespace tinyrender
 		bool isMouseOverGui = false;
 		int selectedObjectIndex = -1;
 		int currentMouseButton = -1;
+		v2f mousePositionAtClickStart;
 
 		// Frame timers
 		float deltaTime = 0.0f;
 		float lastFrame = 0.0f;
 
-		// Gizmo
+		// Guizmo
+		bool guizmoEnabled = true;
 		ImGuizmo::OPERATION guizmoOp = ImGuizmo::TRANSLATE;
 
 		// Render flags
@@ -385,12 +387,24 @@ namespace tinyrender
 		if (action == GLFW_PRESS)
 		{
 			internalScene.currentMouseButton = button;
+
+			// Store mouse position at the start of a left click
+			// This is for detecting if we should reset the selected object
+			// In the scene (only when a single click with no move as been done).
+			// See code below after "if (button == GLFW_MOUSE_BUTTON_LEFT)"
+			if (internalScene.currentMouseButton == GLFW_MOUSE_BUTTON_LEFT)
+				internalScene.mousePositionAtClickStart = getMousePosition();
 		}
 		else if (action == GLFW_RELEASE)
 		{
 			internalScene.currentMouseButton = -1;
-			if (!internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
-				internalScene.selectedObjectIndex = -1;
+
+			if (button == GLFW_MOUSE_BUTTON_LEFT)
+			{
+				bool mouseWasMoved = internalLength2(internalScene.mousePositionAtClickStart - getMousePosition());
+				if (!mouseWasMoved && !internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
+					internalScene.selectedObjectIndex = -1;
+			}
 		}
 	}
 
@@ -782,9 +796,9 @@ namespace tinyrender
 		internalScene.isMouseOverGui = ImGui::GetIO().WantCaptureMouse;
 		
 		// Guizmo
-		ImGuizmo::BeginFrame();
-		if (internalScene.selectedObjectIndex != -1)
+		if (internalScene.selectedObjectIndex != -1 && internalScene.guizmoEnabled)
 		{
+			ImGuizmo::BeginFrame();
 			ImGuizmo::Enable(true);
 			ImGuizmo::SetOrthographic(false);
 			ImGuizmo::SetRect(0, 0, float(width_internal), float(height_internal));
@@ -832,6 +846,16 @@ namespace tinyrender
 			_internalDeleteObject(i);
 		internalObjects.clear();
 		glfwTerminate();
+	}
+
+	/*!
+	\brief Get the current mouse position.
+	*/
+	v2f getMousePosition()
+	{
+		double xpos, ypos;
+		glfwGetCursorPos(windowPtr, &xpos, &ypos);
+		return { float(xpos), float(ypos) };
 	}
 
 
@@ -909,6 +933,15 @@ namespace tinyrender
 		_internalUpdateObject(id, newColors);
 	}
 
+
+	/*!
+	\brief Enable or disable the guizmo tool in the app.
+	\param enabled new state
+	*/
+	void setGuizmoEnabled(bool enabled)
+	{
+		internalScene.guizmoEnabled = enabled;
+	}
 
 	/*!
 	\brief Set the lighting flag (ie. should diffuse light be computed or not)

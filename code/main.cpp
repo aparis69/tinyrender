@@ -102,8 +102,8 @@ static void ExampleAnimatedMesh()
 
 int main() 
 {
-	ExampleLoadMesh();
-	//ExamplePrimitives();
+	//ExampleLoadMesh();
+	ExamplePrimitives();
 	//ExampleHeavyScene();
 	//ExampleAnimatedObject();
 	//ExampleAnimatedMesh();
