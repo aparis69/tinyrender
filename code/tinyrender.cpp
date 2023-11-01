@@ -39,7 +39,7 @@ namespace tinyrender
 		v3f eye = { 10, 0, 0 };
 		v3f at = { 0 };
 		v3f up = { 0, 1, 0 };
-		float camSpeed = 0.01f;
+		float camSpeed = 0.05f;
 		m4 bakedLookAtMatrix;
 		m4 bakedPerspectiveMatrix;
 		bool cameraWasChangedInLastframe = true;
@@ -47,16 +47,16 @@ namespace tinyrender
 		// Interactions
 		float mouseScrollingSpeed = 2.0f;
 		float mouseSensitivity = 0.1f;
-		float mouseLastX = 0.0f;
-		float mouseLastY = 0.0f;
 		bool isMouseOverGui = false;
 		int selectedObjectIndex = -1;
 		int currentMouseButton = -1;
+		v2f mouseLastPosition;
 		v2f mousePositionAtClickStart;
 
-		// Frame timers
+		// Statistics
 		float deltaTime = 0.0f;
 		float lastFrame = 0.0f;
+		int drawCallCount = 0;
 
 		// Guizmo
 		bool userSelectionInViewportEnabled = true;
@@ -143,7 +143,9 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief
+	\brief Compute the ray passing through the current mouse position
+	with existing camera parameter. Internally uses ImGuizmo ComputeCameraRay function.
+	\return the computed ray
 	*/
 	static ray _internalComputeCameraRay()
 	{
@@ -157,7 +159,7 @@ namespace tinyrender
 	/*!
 	\brief Check the shader compile status and print opengl logs if needed.
 	\param handle shader id
-	\param desc shader descriptor string, such as "Vertex Lit", "Fragment Lit" etc...
+	\param desc shader descriptor string, such as "Vertex" or "Fragment".
 	*/
 	static bool _internalCheckShader(GLuint handle, const char* desc)
 	{
@@ -177,7 +179,8 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Load all relevant shaders for the application.
+	\brief Load all relevant shaders for the application. Currently 
+	shader 0 is for basic object lightning, and shader 1 for wireframe rendering.
 	*/
 	static bool _internalLoadShaders()
 	{
@@ -347,8 +350,9 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief Create the internal representation of an object. Initialize opengl buffers.
-	\param obj high level object with mesh, color data, and model matrix.
+	\brief Create the internal representation of an object with a mesh and AABB mesh. 
+	Also initialize opengl buffers and internal model matrices.
+	\param obj high level object with mesh, color, and position/rotation/scale data.
 	*/
 	static objectInternal _internalCreateObject(const object& obj)
 	{
@@ -361,6 +365,8 @@ namespace tinyrender
 			&obj.scale.x,
 			ret.mesh.modelMatrix.m
 		);
+
+		// Model matrix for the AABB is always axis-aligned
 		v3f rotation = { 0, 0, 0 };
 		ImGuizmo::RecomposeMatrixFromComponents(
 			&obj.translation.x,
@@ -594,6 +600,7 @@ namespace tinyrender
 				ImGui::DragFloat("x", &internalScene.lightDir.x, 0.1f, -1.0f, 1.0f);
 				ImGui::DragFloat("y", &internalScene.lightDir.y, 0.1f, -1.0f, 1.0f);
 				ImGui::DragFloat("z", &internalScene.lightDir.z, 0.1f, -1.0f, 1.0f);
+				ImGui::Text("Draw call: %d", internalScene.drawCallCount);
 				ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / float(ImGui::GetIO().Framerate), float(ImGui::GetIO().Framerate));
 			}
 
@@ -626,7 +633,11 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief
+	\brief Check if a ray shot from the current mouse position intersects
+	any scene object's AABB. If multiple intersections occured, the closest 
+	to the camera is returned.
+	\param intersectedObjIndex index of the intersected object. -1 if false is returned.
+	\return true of an intersection occured, false otherwise.
 	*/
 	static bool _internalIntersectSceneObject(int& intersectedObjIndex)
 	{
@@ -732,7 +743,8 @@ namespace tinyrender
 	*/
 	static void _internalScrollCallback(GLFWwindow* window, double x, double y)
 	{
-		_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
+		if (!internalScene.isMouseOverGui)
+			_internalCameraMove(0.0f, 0.0f, float(y) * internalScene.mouseScrollingSpeed, 0.0f, 0.0f);
 	}
 
 	/*!
@@ -903,17 +915,17 @@ namespace tinyrender
 		float x = 0.0f, y = 0.0f, z = 0.0f, xPlane = 0.0f, yPlane = 0.0f;
 		if (internalScene.currentMouseButton == GLFW_MOUSE_BUTTON_LEFT)
 		{
-			float xoffset = float(xpos) - internalScene.mouseLastX;
+			float xoffset = float(xpos) - internalScene.mouseLastPosition.x;
 
 			// Reversed since y-coordinates go from bottom to top
-			float yoffset = internalScene.mouseLastY - float(ypos);
+			float yoffset = internalScene.mouseLastPosition.y - float(ypos);
 			x += (xoffset * internalScene.mouseSensitivity);
 			y += (yoffset * internalScene.mouseSensitivity);
 		}
 		else if (internalScene.currentMouseButton == GLFW_MOUSE_BUTTON_MIDDLE)
 		{
-			float xoffset = float(xpos) - internalScene.mouseLastX;
-			float yoffset = float(ypos) - internalScene.mouseLastY;
+			float xoffset = float(xpos) - internalScene.mouseLastPosition.x;
+			float yoffset = float(ypos) - internalScene.mouseLastPosition.y;
 			xPlane += (xoffset * internalScene.mouseSensitivity);
 			yPlane += (yoffset * internalScene.mouseSensitivity);
 		}
@@ -921,8 +933,8 @@ namespace tinyrender
 		// Scale speed based on distance to the look at point
 		float scale = internalLength(internalScene.at - internalScene.eye);
 		scale = scale > 100.0f ? 100.0f : scale;
-		x *= scale * internalScene.camSpeed * 0.25f;
-		y *= scale * internalScene.camSpeed * 0.25f;
+		x *= scale * internalScene.camSpeed * 0.05f;
+		y *= scale * internalScene.camSpeed * 0.05f;
 		z *= scale * internalScene.camSpeed * 0.025f;
 		xPlane *= scale * internalScene.camSpeed;
 		yPlane *= scale * internalScene.camSpeed;
@@ -932,8 +944,7 @@ namespace tinyrender
 			_internalCameraMove(x, y, z, xPlane, yPlane);
 
 		// Store last mouse pos
-		internalScene.mouseLastX = float(xpos);
-		internalScene.mouseLastY = float(ypos);
+		internalScene.mouseLastPosition = v2f(float(xpos), float(ypos));
 	}
 
 	/*!
@@ -982,6 +993,7 @@ namespace tinyrender
 		glUniform1i(glGetUniformLocation(shaderID, "uShowNormals"), int(internalScene.showNormals));
 
 		// Render all objects
+		internalScene.drawCallCount = 0;
 		for (int i = 0; i < internalObjects.size(); i++)
 		{
 			objectInternal& it = internalObjects[i];
@@ -994,6 +1006,7 @@ namespace tinyrender
 			// Render object
 			glBindVertexArray(it.mesh.vao);
 			glDrawElements(GL_TRIANGLES, it.mesh.drawCount, GL_UNSIGNED_INT, 0);
+			internalScene.drawCallCount++;
 		}
 
 		// Render bounding box of selected object
@@ -1017,6 +1030,7 @@ namespace tinyrender
 			glDrawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_INT, (GLvoid*)(4 * sizeof(int)));
 			glDrawElements(GL_LINES, 8, GL_UNSIGNED_INT, (GLvoid*)(8 * sizeof(int)));
 			glLineWidth(1.0f); // Reset to default value to not interfer with other things
+			internalScene.drawCallCount += 3;
 		}
 
 		// Prepare imgui/imguizmo frames
@@ -1029,6 +1043,7 @@ namespace tinyrender
 		if (internalScene.selectedObjectIndex != -1 && internalScene.guizmoEnabled)
 		{
 			objectInternal& selectedObject = internalObjects[internalScene.selectedObjectIndex];
+
 			ImGuizmo::BeginFrame();
 			ImGuizmo::Enable(true);
 			ImGuizmo::SetOrthographic(false);
@@ -1041,6 +1056,8 @@ namespace tinyrender
 				selectedObject.mesh.modelMatrix.m,
 				NULL, NULL, NULL, NULL
 			);
+
+			// Update internal model matrix
 			v3f t, r, s;
 			ImGuizmo::DecomposeMatrixToComponents(
 				selectedObject.mesh.modelMatrix.m,
@@ -1048,6 +1065,7 @@ namespace tinyrender
 				&r.x,
 				&s.x
 			);
+			// AABB matrix do not take into account rotations
 			r = { 0.0f, 0.0f, 0.0f };
 			ImGuizmo::RecomposeMatrixFromComponents(
 				&t.x, &r.x, &s.x,
