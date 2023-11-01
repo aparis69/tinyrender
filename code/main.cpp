@@ -47,7 +47,7 @@ static void ExamplePrimitives()
 
 static void ExampleHeavyScene()
 {
-	srand(time(NULL));
+	srand(unsigned int(time(NULL)));
 
 	tinyrender::init("tinyrender - primitives", 800, 600);
 	tinyrender::setCameraAt({ 0.f, 0.f, 0.f });

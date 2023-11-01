@@ -13,27 +13,25 @@
 
 namespace tinyrender
 {
-	struct object_internal
-	{
-	public:
-		aabb boundingBox;
-		GLuint vao = 0;
-		GLuint buffers = 0;
-		GLuint triangleBuffer = 0;
-		m4 modelMatrix;
-		int triangleCount = 0;
-		bool isDeleted = false;
-	};
-
-	struct bbox_object_internal
+	struct meshInternal
 	{
 		GLuint vao = 0;
 		GLuint buffers = 0;
 		GLuint indexBuffer = 0;
+		int drawCount = 0;
+		m4 modelMatrix;
+	};
+
+	struct objectInternal
+	{
+	public:
+		aabb boundingBox;
+		meshInternal mesh;
+		meshInternal meshBbox;
 		bool isDeleted = false;
 	};
 
-	struct scene_internal
+	struct sceneInternal
 	{
 	public:
 		// Camera settings
@@ -74,11 +72,10 @@ namespace tinyrender
 	};
 
 	static GLFWwindow* windowPtr;
-	static int width_internal, height_internal;
-	static std::vector<object_internal> internalObjects;
-	static std::vector<bbox_object_internal> internalBoxObjects;
+	static int internalWidth, internalHeight;
+	static std::vector<objectInternal> internalObjects;
 	static std::vector<GLuint> internalShaders;
-	static scene_internal internalScene;
+	static sceneInternal internalScene;
 	static bool initWasCalled = false;
 
 
@@ -143,6 +140,18 @@ namespace tinyrender
 
 			internalScene.cameraWasChangedInLastframe = true;
 		}
+	}
+
+	/*!
+	\brief
+	*/
+	static ray _internalComputeCameraRay()
+	{
+		ray r;
+		ImGuizmo::SetOrthographic(false);
+		ImGuizmo::SetRect(0, 0, float(internalWidth), float(internalHeight));
+		ImGuizmo::ComputeCameraRay(&r.o.x, &r.d.x, internalScene.bakedLookAtMatrix.m, internalScene.bakedPerspectiveMatrix.m);
+		return r;
 	}
 
 	/*!
@@ -309,7 +318,6 @@ namespace tinyrender
 				"{\n"
 				"	 outFragmentColor = vec4(0, 0, 0, 1.0); \n"
 				"}\n";
-			GLuint g_ShaderHandle = 0, g_VertHandle = 0, g_FragHandle = 0, g_GeomHandle = 0;
 			g_VertHandle = glCreateShader(GL_VERTEX_SHADER);
 			glShaderSource(g_VertHandle, 1, &vertexShaderSource, NULL);
 			glCompileShader(g_VertHandle);
@@ -339,101 +347,108 @@ namespace tinyrender
 	}
 
 	/*!
-	\brief
-	*/
-	static bbox_object_internal _internalCreateBoxObject(const aabb& box)
-	{
-		bbox_object_internal ret;
-
-		glGenVertexArrays(1, &ret.vao);
-		glGenBuffers(1, &ret.buffers);
-		glGenBuffers(1, &ret.indexBuffer);
-
-		glBindVertexArray(ret.vao);
-
-		// Vertices
-		std::vector<float> vertices;
-		vertices.resize(3 * 8);
-		for (int i = 0; i < 8; i++)
-		{
-			v3f v = box.vertex(i);
-			vertices[(i * 3) + 0] = float(v[0]);
-			vertices[(i * 3) + 1] = float(v[1]);
-			vertices[(i * 3) + 2] = float(v[2]);
-		}
-		glBindBuffer(GL_ARRAY_BUFFER, ret.buffers);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(float) * int(vertices.size()), vertices.data(), GL_STATIC_DRAW);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-		glEnableVertexAttribArray(0);
-
-		// Triangles (indexed to match aabb::vertex function)
-		int elements[] = {
-		  0, 1, 3, 2,
-		  4, 5, 7, 6,
-		  0, 4, 5, 1,
-		  2, 6, 7, 3
-		};
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ret.indexBuffer);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(elements), elements, GL_STATIC_DRAW);
-
-		return ret;
-	}
-
-	/*!
 	\brief Create the internal representation of an object. Initialize opengl buffers.
 	\param obj high level object with mesh, color data, and model matrix.
 	*/
-	static object_internal _internalCreateObject(const object& obj)
+	static objectInternal _internalCreateObject(const object& obj)
 	{
-		object_internal ret;
-
-		// Default colors
-		std::vector<v3f> colors = obj.colors;
-		if (colors.empty())
-			colors.resize(obj.vertices.size(), { 0.5f, 0.5f, 0.5f });
+		objectInternal ret;
 
 		// Model matrix
-		ImGuizmo::RecomposeMatrixFromComponents(&obj.position.x, &obj.rotation.x, &obj.scale.x, ret.modelMatrix.m);
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&obj.translation.x,
+			&obj.rotation.x,
+			&obj.scale.x,
+			ret.mesh.modelMatrix.m
+		);
+		v3f rotation = { 0, 0, 0 };
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&obj.translation.x,
+			&rotation.x,
+			&obj.scale.x,
+			ret.meshBbox.modelMatrix.m
+		);
 
 		// Bounding box
 		ret.boundingBox = computeAABB(obj.vertices);
-		ret.boundingBox = transform(ret.boundingBox, ret.modelMatrix);
 		fixFlatAABB(ret.boundingBox);
 
-		// VAO
-		glGenVertexArrays(1, &ret.vao);
-		glBindVertexArray(ret.vao);
+		// Object mesh
+		{
+			// Default colors
+			std::vector<v3f> colors = obj.colors;
+			if (colors.empty())
+				colors.resize(obj.vertices.size(), { 0.5f, 0.5f, 0.5f });
 
-		// OpenGL buffers
-		size_t fullSize = sizeof(v3f) * size_t(obj.vertices.size() + obj.normals.size() + colors.size());
-		glGenBuffers(1, &ret.buffers);
-		glBindBuffer(GL_ARRAY_BUFFER, ret.buffers);
-		glBufferData(GL_ARRAY_BUFFER, fullSize, nullptr, GL_STATIC_DRAW);
+			// VAO
+			glGenVertexArrays(1, &ret.mesh.vao);
+			glBindVertexArray(ret.mesh.vao);
 
-		size_t size = 0;
-		size_t offset = 0;
-		size = sizeof(v3f) * obj.vertices.size();
-		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.vertices.front());
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
-		glEnableVertexAttribArray(0);
+			// OpenGL buffers
+			size_t fullSize = sizeof(v3f) * size_t(obj.vertices.size() + obj.normals.size() + colors.size());
+			glGenBuffers(1, &ret.mesh.buffers);
+			glBindBuffer(GL_ARRAY_BUFFER, ret.mesh.buffers);
+			glBufferData(GL_ARRAY_BUFFER, fullSize, nullptr, GL_STATIC_DRAW);
 
-		offset = offset + size;
-		size = sizeof(v3f) * obj.normals.size();
-		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.normals.front());
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
-		glEnableVertexAttribArray(1);
+			size_t size = 0;
+			size_t offset = 0;
+			size = sizeof(v3f) * obj.vertices.size();
+			glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.vertices.front());
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
+			glEnableVertexAttribArray(0);
 
-		offset = offset + size;
-		size = sizeof(v3f) * colors.size();
-		glBufferSubData(GL_ARRAY_BUFFER, offset, size, &colors.front());
-		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
-		glEnableVertexAttribArray(2);
+			offset = offset + size;
+			size = sizeof(v3f) * obj.normals.size();
+			glBufferSubData(GL_ARRAY_BUFFER, offset, size, &obj.normals.front());
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
+			glEnableVertexAttribArray(1);
 
-		glGenBuffers(1, &ret.triangleBuffer);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ret.triangleBuffer);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(int) * obj.triangles.size(), &obj.triangles.front(), GL_STATIC_DRAW);
-		ret.triangleCount = int(obj.triangles.size());
+			offset = offset + size;
+			size = sizeof(v3f) * colors.size();
+			glBufferSubData(GL_ARRAY_BUFFER, offset, size, &colors.front());
+			glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, (const void*)offset);
+			glEnableVertexAttribArray(2);
 
+			glGenBuffers(1, &ret.mesh.indexBuffer);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ret.mesh.indexBuffer);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(int) * obj.triangles.size(), &obj.triangles.front(), GL_STATIC_DRAW);
+			ret.mesh.drawCount = int(obj.triangles.size());
+		}
+
+		// Bbox mesh
+		{
+			glGenVertexArrays(1, &ret.meshBbox.vao);
+			glGenBuffers(1, &ret.meshBbox.buffers);
+			glGenBuffers(1, &ret.meshBbox.indexBuffer);
+
+			glBindVertexArray(ret.meshBbox.vao);
+
+			// Vertices
+			std::vector<float> vertices;
+			vertices.resize(3 * 8);
+			for (int i = 0; i < 8; i++)
+			{
+				v3f v = ret.boundingBox.vertex(i);
+				vertices[(i * 3) + 0] = float(v[0]);
+				vertices[(i * 3) + 1] = float(v[1]);
+				vertices[(i * 3) + 2] = float(v[2]);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, ret.meshBbox.buffers);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(float) * int(vertices.size()), vertices.data(), GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+			glEnableVertexAttribArray(0);
+
+			// Triangles (indexed to match aabb::vertex function)
+			int elements[] = {
+			  0, 1, 3, 2,
+			  4, 5, 7, 6,
+			  0, 4, 5, 1,
+			  2, 6, 7, 3
+			};
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ret.meshBbox.indexBuffer);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(elements), elements, GL_STATIC_DRAW);
+		}
+		
 		return ret;
 	}
 
@@ -445,18 +460,29 @@ namespace tinyrender
 	*/
 	static void _internalUpdateObject(int id, const object& newObj)
 	{
-		object_internal& obj = internalObjects[id];
+		objectInternal& obj = internalObjects[id];
 
 		// Model matrix
-		ImGuizmo::RecomposeMatrixFromComponents(&newObj.position.x, &newObj.rotation.x, &newObj.scale.x, obj.modelMatrix.m);
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&newObj.translation.x, 
+			&newObj.rotation.x, 
+			&newObj.scale.x, 
+			obj.mesh.modelMatrix.m
+		);
+		v3f rotation = { 0, 0, 0 };
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&newObj.translation.x,
+			&rotation.x,
+			&newObj.scale.x,
+			obj.meshBbox.modelMatrix.m
+		);
 
 		// Bounding box
 		obj.boundingBox = computeAABB(newObj.vertices);
-		obj.boundingBox = transform(obj.boundingBox, obj.modelMatrix);
 		fixFlatAABB(obj.boundingBox);
 
-		glBindVertexArray(obj.vao);
-		glBindBuffer(GL_ARRAY_BUFFER, obj.buffers);
+		glBindVertexArray(obj.mesh.vao);
+		glBindBuffer(GL_ARRAY_BUFFER, obj.mesh.buffers);
 		size_t size = 0;
 		size_t offset = 0;
 		size = sizeof(v3f) * newObj.vertices.size();
@@ -480,9 +506,9 @@ namespace tinyrender
 	static void _internalUpdateObject(int id, const std::vector<v3f>& newColors)
 	{
 		assert(!newColors.empty());
-		object_internal& obj = internalObjects[id];
-		glBindVertexArray(obj.vao);
-		glBindBuffer(GL_ARRAY_BUFFER, obj.buffers);
+		objectInternal& obj = internalObjects[id];
+		glBindVertexArray(obj.mesh.vao);
+		glBindBuffer(GL_ARRAY_BUFFER, obj.mesh.buffers);
 		size_t size = 0;
 		size_t offset = 0;
 		size = sizeof(v3f) * newColors.size();
@@ -496,25 +522,23 @@ namespace tinyrender
 	*/
 	static bool _internalDeleteObject(int index)
 	{
-		object_internal& obj = internalObjects[index];
+		objectInternal& obj = internalObjects[index];
 		if (obj.isDeleted)
 			return false;
 
-		glDeleteBuffers(1, &obj.buffers);
-		glDeleteBuffers(1, &obj.triangleBuffer);
-		glDeleteVertexArrays(1, &obj.vao);
+		// Destroy base mesh
+		glDeleteBuffers(1, &obj.mesh.buffers);
+		glDeleteBuffers(1, &obj.mesh.indexBuffer);
+		glDeleteVertexArrays(1, &obj.mesh.vao);
+
+		// Destroy bbox
+		glDeleteBuffers(1, &obj.meshBbox.buffers);
+		glDeleteBuffers(1, &obj.meshBbox.indexBuffer);
+		glDeleteVertexArrays(1, &obj.meshBbox.vao);
 
 		// Objects are not actually removed from the internal vector, but flagged as deleted.
 		// This is to ensure indices of existing objects will not change from the API point of view.
 		obj.isDeleted = true;
-
-		// Destroy bbox
-		bbox_object_internal& boxObj = internalBoxObjects[index];
-		assert(boxObj.isDeleted == false);
-		glDeleteBuffers(1, &boxObj.buffers);
-		glDeleteBuffers(1, &boxObj.indexBuffer);
-		glDeleteVertexArrays(1, &boxObj.vao);
-		boxObj.isDeleted = true;
 
 		return true;
 	}
@@ -526,9 +550,9 @@ namespace tinyrender
 	*/
 	static bool _internalTryDeleteObject(int id)
 	{
-		if (id < 0 || id >= internalObjects.size())
+		if (id < 0 || id >= int(internalObjects.size()))
 			return false;
-		for (int i = 0; i < internalObjects.size(); i++)
+		for (int i = 0; i < int(internalObjects.size()); i++)
 		{
 			if (i == id)
 				return _internalDeleteObject(i);
@@ -604,9 +628,33 @@ namespace tinyrender
 	/*!
 	\brief
 	*/
-	static void _intersectSceneObject()
+	static bool _internalIntersectSceneObject(int& intersectedObjIndex)
 	{
+		// Build ray from camera position
+		const ray r = _internalComputeCameraRay();
 
+		// Check intersection with all bounding boxes
+		intersectedObjIndex = -1;
+		float minIntersectionDepth = 100000.0f;
+		for (int i = 0; i < int(internalObjects.size()); i++) 
+		{
+			// Check intersection with bbox translated & scaled
+			aabb transformedBbox = transform(
+				internalObjects[i].boundingBox, 
+				internalObjects[i].meshBbox.modelMatrix
+			);
+
+			// Keep closest hit
+			float t;
+			if (intersect(r, transformedBbox, t)
+				&& t > 0.0f
+				&& t < minIntersectionDepth)
+			{
+				intersectedObjIndex = i;
+				minIntersectionDepth = t;
+			}
+		}
+		return (intersectedObjIndex != -1);
 	}
 
 	/*!
@@ -618,8 +666,8 @@ namespace tinyrender
 	static void _internalWindowResizeCallback(GLFWwindow* window, int w, int h)
 	{
 		glViewport(0, 0, w, h);
-		width_internal = w;
-		height_internal = h;
+		internalWidth = w;
+		internalHeight = h;
 		internalScene.cameraWasChangedInLastframe = true;
 	}
 
@@ -644,12 +692,6 @@ namespace tinyrender
 			if (internalScene.currentMouseButton == GLFW_MOUSE_BUTTON_LEFT)
 			{
 				internalScene.mousePositionAtClickStart = getMousePosition();
-
-				// Check if the user selected something
-				if (internalScene.userSelectionInViewportEnabled)
-				{
-
-				}
 			}
 		}
 		else if (action == GLFW_RELEASE)
@@ -658,9 +700,26 @@ namespace tinyrender
 
 			if (button == GLFW_MOUSE_BUTTON_LEFT)
 			{
-				bool mouseWasMoved = internalLength2(internalScene.mousePositionAtClickStart - getMousePosition());
-				if (!mouseWasMoved && !internalScene.isMouseOverGui && !ImGuizmo::IsUsing())
-					internalScene.selectedObjectIndex = -1;
+				bool mouseWasMoved = internalLength2(internalScene.mousePositionAtClickStart - getMousePosition()) > 1.0f;
+				bool mouseOverGui = internalScene.isMouseOverGui;
+				bool mouseOverGuizmo = ImGuizmo::IsUsing();
+				if (!mouseWasMoved)
+				{
+					if (internalScene.userSelectionInViewportEnabled)
+					{
+						int intersectedObjIndex = -1;
+						bool intersectObject = _internalIntersectSceneObject(intersectedObjIndex);
+						if (!mouseOverGui && !mouseOverGuizmo && intersectObject)
+							internalScene.selectedObjectIndex = intersectedObjIndex;
+						else if (!mouseOverGui && !mouseOverGuizmo)
+							internalScene.selectedObjectIndex = -1;
+					}
+					else
+					{
+						if (!mouseOverGui && !mouseOverGuizmo)
+							internalScene.selectedObjectIndex = -1;
+					}
+				}		
 			}
 		}
 	}
@@ -741,8 +800,8 @@ namespace tinyrender
 			width = mode->width;
 			height = mode->height;
 		}
-		width_internal = width;
-		height_internal = height;
+		internalWidth = width;
+		internalHeight = height;
 
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -898,15 +957,15 @@ namespace tinyrender
 			internalScene.bakedPerspectiveMatrix = perspectiveMatrix(
 				internalScene.zNear,
 				internalScene.zFar,
-				float(width_internal),
-				float(height_internal)
+				float(internalWidth),
+				float(internalHeight)
 			);
 			internalScene.cameraWasChangedInLastframe = false;
 		}
 
 		// Precomputed uniform values
-		const float wireframeThicknessX = float(width_internal) / internalScene.wireframeThickness;
-		const float wireframeThicknessY = float(height_internal) / internalScene.wireframeThickness;
+		const float wireframeThicknessX = float(internalWidth) / internalScene.wireframeThickness;
+		const float wireframeThicknessY = float(internalHeight) / internalScene.wireframeThickness;
 		const v3f normalizedLight = internalNormalize(internalScene.lightDir);
 
 		// Single shader for now
@@ -925,40 +984,40 @@ namespace tinyrender
 		// Render all objects
 		for (int i = 0; i < internalObjects.size(); i++)
 		{
-			object_internal& it = internalObjects[i];
+			objectInternal& it = internalObjects[i];
 			if (it.isDeleted)
 				continue;
 
 			// Only unique uniform for an object is its model matrix
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, it.modelMatrix.m);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1,	GL_FALSE, it.mesh.modelMatrix.m);
 
 			// Render object
-			glBindVertexArray(it.vao);
-			glDrawElements(GL_TRIANGLES, it.triangleCount, GL_UNSIGNED_INT, 0);
+			glBindVertexArray(it.mesh.vao);
+			glDrawElements(GL_TRIANGLES, it.mesh.drawCount, GL_UNSIGNED_INT, 0);
 		}
 
-		// Render bounding boxes
-		shaderID = internalShaders[1];
-		glUseProgram(shaderID);
-		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, internalScene.bakedPerspectiveMatrix.m);
-		glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, internalScene.bakedLookAtMatrix.m);
-		glLineWidth(internalScene.wireframeThickness);
-		for (int i = 0; i < internalBoxObjects.size(); i++)
+		// Render bounding box of selected object
+		if (internalScene.selectedObjectIndex != -1)
 		{
-			bbox_object_internal& it = internalBoxObjects[i];
-			if (it.isDeleted)
-				continue;
+			objectInternal& it = internalObjects[internalScene.selectedObjectIndex];
+			assert(it.isDeleted == false);
 
-			// Model matrix come from the actual object, not the bounding box.
-			const float* modelMatrix = internalObjects[i].modelMatrix.m;
-			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, modelMatrix);
+			shaderID = internalShaders[1];
+			glUseProgram(shaderID);
 
-			glBindVertexArray(it.vao);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uProjection"), 1, GL_FALSE, internalScene.bakedPerspectiveMatrix.m);
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uView"), 1, GL_FALSE, internalScene.bakedLookAtMatrix.m);
+			// Model matrix for aabb do not have any rotation
+			glUniformMatrix4fv(glGetUniformLocation(shaderID, "uModel"), 1, GL_FALSE, it.meshBbox.modelMatrix.m);
+
+			glBindVertexArray(it.meshBbox.vao);
+
+			glLineWidth(2.0f);
 			glDrawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_INT, 0);
 			glDrawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_INT, (GLvoid*)(4 * sizeof(int)));
 			glDrawElements(GL_LINES, 8, GL_UNSIGNED_INT, (GLvoid*)(8 * sizeof(int)));
+			glLineWidth(1.0f); // Reset to default value to not interfer with other things
 		}
-		glLineWidth(1.0f); // Reset to default value to not interfer with other things
 
 		// Prepare imgui/imguizmo frames
 		ImGui_ImplOpenGL3_NewFrame();
@@ -969,26 +1028,31 @@ namespace tinyrender
 		// Guizmo
 		if (internalScene.selectedObjectIndex != -1 && internalScene.guizmoEnabled)
 		{
-			object_internal& selectedObject = internalObjects[internalScene.selectedObjectIndex];
-
+			objectInternal& selectedObject = internalObjects[internalScene.selectedObjectIndex];
 			ImGuizmo::BeginFrame();
 			ImGuizmo::Enable(true);
 			ImGuizmo::SetOrthographic(false);
-			ImGuizmo::SetRect(0, 0, float(width_internal), float(height_internal));
+			ImGuizmo::SetRect(0, 0, float(internalWidth), float(internalHeight));
 			ImGuizmo::Manipulate(
 				internalScene.bakedLookAtMatrix.m,
 				internalScene.bakedPerspectiveMatrix.m,
 				internalScene.guizmoOp,
 				ImGuizmo::WORLD,
-				selectedObject.modelMatrix.m,
-				NULL,
-				NULL,
-				NULL,
-				NULL
+				selectedObject.mesh.modelMatrix.m,
+				NULL, NULL, NULL, NULL
 			);
-
-			// TODO(Axel): To check, maybe apply the deltaMatrix from Manipulate() instead.
-			selectedObject.boundingBox = transform(selectedObject.boundingBox, selectedObject.modelMatrix);
+			v3f t, r, s;
+			ImGuizmo::DecomposeMatrixToComponents(
+				selectedObject.mesh.modelMatrix.m,
+				&t.x,
+				&r.x,
+				&s.x
+			);
+			r = { 0.0f, 0.0f, 0.0f };
+			ImGuizmo::RecomposeMatrixFromComponents(
+				&t.x, &r.x, &s.x,
+				selectedObject.meshBbox.modelMatrix.m
+			);
 		}
 
 		// Internal gui and guizmo rendering
@@ -1045,22 +1109,12 @@ namespace tinyrender
 	int addObject(const object& obj)
 	{
 		assert(initWasCalled && "You must call tinyrender::init() before anything else");
-
-		// Object
-		object_internal internalObject = _internalCreateObject(obj);
+		objectInternal internalObject = _internalCreateObject(obj);
 		int index = _internalGetNextFreeIndex();
 		if (index == internalObjects.size())
 			internalObjects.push_back(internalObject);
 		else
 			internalObjects[index] = internalObject;
-
-		// Bounding box
-		bbox_object_internal internalBox = _internalCreateBoxObject(internalObject.boundingBox);
-		if (index == internalBoxObjects.size())
-			internalBoxObjects.push_back(internalBox);
-		else
-			internalBoxObjects[index] = internalBox;
-
 		return index;
 	}
 
@@ -1097,13 +1151,20 @@ namespace tinyrender
 	\param pos new position
 	\param scale new scale
 	*/
-	void updateObject(int id, const v3f& position, const v3f& rotation, const v3f& scale)
+	void updateObject(int id, const v3f& translation, const v3f& rotation, const v3f& scale)
 	{
 		assert(initWasCalled && "You must call tinyrender::init() before anything else");
 		assert(id >= 0 && id < internalObjects.size());
-		object_internal& obj = internalObjects[id];
-		ImGuizmo::RecomposeMatrixFromComponents(&position.x, &rotation.x, &scale.x, obj.modelMatrix.m);
-		obj.boundingBox = transform(obj.boundingBox, obj.modelMatrix);
+		objectInternal& obj = internalObjects[id];
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&translation.x, &rotation.x, &scale.x, 
+			obj.mesh.modelMatrix.m
+		);
+		v3f rot = { 0, 0, 0 }; 
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&translation.x, &rot.x, &scale.x, 
+			obj.meshBbox.modelMatrix.m
+		);
 	}
 
 	/*!
@@ -1235,8 +1296,8 @@ namespace tinyrender
 		// Create set of vertices
 		const float Pi = 3.14159265358979323846f;
 		const float HalfPi = Pi / 2.0f;
-		const float dt = Pi / n;
-		const float df = Pi / n;
+		const float dt = Pi / float(n);
+		const float df = Pi / float(n);
 		int k = 0;
 
 		float f = -HalfPi;
@@ -1326,7 +1387,7 @@ namespace tinyrender
 		{
 			for (int j = 0; j < n; j++)
 			{
-				v3f v = a + v3f({ step.x * i, 0.f, step.z * j });
+				v3f v = a + v3f({ step.x * float(i), 0.f, step.z * float(j) });
 				planeObject.vertices.push_back(v);
 				planeObject.normals.push_back({ 0.f, 1.f, 0.f });
 				planeObject.colors.push_back({ 0.7f, 0.7f, 0.7f });
@@ -1448,11 +1509,11 @@ namespace tinyrender
 			return false;
 		}
 		out << "g " << "Obj" << std::endl;
-		for (int i = 0; i < object.vertices.size(); i++)
+		for (unsigned int i = 0; i < object.vertices.size(); i++)
 			out << "v " << object.vertices.at(i).x << " " << object.vertices.at(i).y << " " << object.vertices.at(i).z << '\n';
-		for (int i = 0; i < object.normals.size(); i++)
+		for (unsigned int i = 0; i < object.normals.size(); i++)
 			out << "vn " << object.normals.at(i).x << " " << object.normals.at(i).z << " " << object.normals.at(i).y << '\n';
-		for (int i = 0; i < object.triangles.size(); i += 3)
+		for (unsigned int i = 0; i < object.triangles.size(); i += 3)
 		{
 			out << "f " << object.triangles.at(i) + 1 << "//" << object.triangles.at(i) + 1
 				<< " " << object.triangles.at(i + 1) + 1 << "//" << object.triangles.at(i + 1) + 1
@@ -1519,7 +1580,7 @@ namespace tinyrender
 		// Make sure the loaded object has normals
 		if (attrib.normals.size() == 0)
 		{
-			for (int i = 0; i < obj.triangles.size(); i += 3)
+			for (unsigned int i = 0; i < obj.triangles.size(); i += 3)
 			{
 				const auto& v0 = obj.vertices[obj.triangles[i + 0]];
 				const auto& v1 = obj.vertices[obj.triangles[i + 1]];
@@ -1529,7 +1590,7 @@ namespace tinyrender
 				obj.normals[obj.triangles[i + 1]] += n;
 				obj.normals[obj.triangles[i + 2]] += n;
 			}
-			for (int i = 0; i < obj.normals.size(); i++)
+			for (unsigned int i = 0; i < obj.normals.size(); i++)
 				obj.normals[i] = tinyrender::internalNormalize(obj.normals[i]);
 		}
 

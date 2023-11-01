@@ -32,6 +32,9 @@ namespace tinyrender
 			float v[2];
 			struct { float x, y; };
 		};
+		inline v2f() { }
+		inline v2f(float x) : x(x), y(x) { }
+		inline v2f(float x, float y) : x(x), y(y) { }
 	} v2f;
 	inline float internalLength2(const v2f v)
 	{
@@ -40,6 +43,22 @@ namespace tinyrender
 	inline v2f operator-(const v2f& l, const v2f r)
 	{
 		return { l.x - r.x, l.y - r.y };
+	}
+	inline v2f operator+(const v2f& l, const v2f r)
+	{
+		return { l.x + r.x, l.y + r.y };
+	}
+	inline v2f operator/(const v2f& l, const v2f r)
+	{
+		return { l.x / r.x, l.y / r.y };
+	}
+	inline v2f operator*(const v2f& l, float x)
+	{
+		return { l.x * x, l.y * x };
+	}
+	inline v2f operator*(float x, const v2f& l)
+	{
+		return { l.x * x, l.y * x };
 	}
 
 	typedef struct v3f
@@ -61,6 +80,10 @@ namespace tinyrender
 			return *this;
 		}
 		inline float& operator[](int i)
+		{
+			return v[i];
+		}
+		inline float operator[](int i) const
 		{
 			return v[i];
 		}
@@ -215,6 +238,17 @@ namespace tinyrender
 		return out;
 	}
 
+	typedef struct ray
+	{
+	public:
+		v3f o;
+		v3f d;
+
+		inline ray() { }
+		inline ray(const v3f& o, const v3f& d) : o(o), d(d) { }
+		inline v3f operator()(float t) { return o + d * t; }
+	} ray;
+
 	typedef struct aabb
 	{
 	public:
@@ -228,7 +262,8 @@ namespace tinyrender
 	inline aabb computeAABB(const std::vector<v3f>& pts)
 	{
 		aabb ret =
-		{	{ 100000.0f, 100000.0f, 100000.0f },
+		{
+			{ 100000.0f, 100000.0f, 100000.0f },
 			{ -100000.0f, -100000.0f, -100000.0f }
 		};
 		for (const v3f& p : pts)
@@ -250,20 +285,140 @@ namespace tinyrender
 		{
 			if (box.a[i] == box.b[i])
 			{
-				box.a[i] -= 0.1f;
-				box.b[i] += 0.1f;
+				box.a[i] -= 0.05f;
+				box.b[i] += 0.05f;
 			}
 		}
+	}
+	inline bool intersect(const ray& r, const aabb& box, float& t)
+	{
+		const float epsilon = 1e-5f;
+
+		float tmin = -1e16f;
+		float tmax = 1e16f;
+
+		const v3f p = r.o;
+		const v3f d = r.d;
+		const v3f a = box.a;
+		const v3f b = box.b;
+
+		// Ox
+		if (d[0] < -epsilon)
+		{
+			t = (a[0] - p[0]) / d[0];
+			if (t < tmin)
+				return 0;
+			if (t <= tmax)
+				tmax = t;
+			t = (b[0] - p[0]) / d[0];
+			if (t >= tmin)
+			{
+				if (t > tmax)
+					return 0;
+				tmin = t;
+			}
+		}
+		else if (d[0] > epsilon)
+		{
+			t = (b[0] - p[0]) / d[0];
+			if (t < tmin)
+				return 0;
+			if (t <= tmax)
+				tmax = t;
+			t = (a[0] - p[0]) / d[0];
+			if (t >= tmin)
+			{
+				if (t > tmax)
+					return 0;
+				tmin = t;
+			}
+		}
+		else if (p[0]<a[0] || p[0]>b[0])
+			return 0;
+
+		// Oy
+		if (d[1] < -epsilon)
+		{
+			t = (a[1] - p[1]) / d[1];
+			if (t < tmin)
+				return 0;
+			if (t <= tmax)
+				tmax = t;
+			t = (b[1] - p[1]) / d[1];
+			if (t >= tmin)
+			{
+				if (t > tmax)
+					return 0;
+				tmin = t;
+			}
+		}
+		else if (d[1] > epsilon)
+		{
+			t = (b[1] - p[1]) / d[1];
+			if (t < tmin)
+				return 0;
+			if (t <= tmax)
+				tmax = t;
+			t = (a[1] - p[1]) / d[1];
+			if (t >= tmin)
+			{
+				if (t > tmax)
+					return 0;
+				tmin = t;
+			}
+		}
+		else if (p[1]<a[1] || p[1]>b[1])
+			return 0;
+
+		// Oz
+		if (d[2] < -epsilon)
+		{
+			t = (a[2] - p[2]) / d[2];
+			if (t < tmin)
+				return 0;
+			if (t <= tmax)
+				tmax = t;
+			t = (b[2] - p[2]) / d[2];
+			if (t >= tmin)
+			{
+				if (t > tmax)
+					return 0;
+				tmin = t;
+			}
+		}
+		else if (d[2] > epsilon)
+		{
+			t = (b[2] - p[2]) / d[2];
+			if (t < tmin)
+				return 0;
+			if (t <= tmax)
+				tmax = t;
+			t = (a[2] - p[2]) / d[2];
+			if (t >= tmin)
+			{
+				if (t > tmax)
+					return 0;
+				tmin = t;
+			}
+		}
+		else if (p[2]<a[2] || p[2]>b[2])
+			return 0;
+
+		if (tmin < 0.0f)
+			t = tmax;
+		else
+			t = tmin;
+
+		return 1;
 	}
 
 	// Public interface
 	struct object
 	{
 	public:
-		v3f position = { 0, 0, 0 };
+		v3f translation = { 0, 0, 0 };
 		v3f rotation = { 0, 0, 0 };
 		v3f scale = { 1, 1, 1 };
-
 		std::vector<v3f> vertices;
 		std::vector<v3f> normals;
 		std::vector<v3f> colors;
@@ -286,7 +441,7 @@ namespace tinyrender
 	int addObject(const object& obj);
 	bool removeObject(int id);
 	void updateObject(int id, const object& obj);
-	void updateObject(int id, const v3f& position, const v3f& rotation, const v3f& scale);
+	void updateObject(int id, const v3f& translation, const v3f& rotation, const v3f& scale);
 	void updateObject(int id, const std::vector<v3f>& newColors);
 	aabb getBoundingBox(int id);
 
