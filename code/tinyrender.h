@@ -1,3 +1,70 @@
+/**
+ * tinyrender - version 0.1
+ * Author - Axel Paris
+ * 
+ * This is free and unencumbered software released into the public domain.
+ * Anyone is free to copy, modify, publish, use, compile, sell, or
+ * distribute this software, either in source code form or as a compiled
+ * binary, for any purpose, commercial or non-commercial, and by any
+ * means.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+
+ * Documentation
+ * -------------------------------
+ * tinyrender is a minimalist single .h/.cpp viewer based on OpenGL 3.3 and GLFW with few dependencies. 
+ * The API is meant to be as simple as possible, with possibly many options not exposed to the user. Feel 
+ * free to modify it for your own purposes, the set of examples in main.cpp is rather simple. 
+ * Note: internal math structures/functions are not meant to be used outside to the renderer.
+ * Note: the renderer is not meant to be fast or efficient.
+ * 
+ * The library was developed using Visual Studio 2022 on Windows only, mainly for debug purposes and projects
+ * that are not focused on rendering. No CMakefile is provided for now, but this might change in the future.
+ * 
+ * Functionalities
+ *   -The up direction is (0, 1, 0)
+ *   -Internal representation: an object is a triangle mesh
+ *	 -Rendering API: directional lighting, wireframe rendering, normal shading. Shaders are hardcoded in C++ (see "_internalLoadShaders()")
+ *   -Mesh API: mesh primitive creation (sphere, box, grids), and loading/saving through tinyobj (only triangle 
+ *    meshes are supported)
+ *   -Scene API: objects can be added, deleted, and modified at runtime in two ways:
+ *      -A basic scene list is available in the GUI, where users can select objects by their name
+ *      -Selection in the viewport is available (through ray/AABB intersection tests), and objects can be 
+ *       translated/rotated/scaled using 3D Guizmos
+ * 
+ * Controls
+ *	 Camera
+ *		-Rotation around focus point: left button + move for rotation, or keyboard arrows
+ *      -Screen-space panning using middle button + move
+ *      -Zoom using mouse scroll
+ *   Guizmo
+ *		-Selection through click on object, or in the scene list in the GUI.
+ *		 Warning: viewport selection must be enabled using tinyrender::setSelectionInViewportEnabled(true).
+ *		-Translation tool (t), Rotation tool (r), and scaling tool (s) once an object is selected
+ *		 Warning: Guizmo must be enabled using tinyrender::setGuizmoEnabled(true)
+ *		-Deleting the selected object is done using 'delete' key
+ * 
+ * Dependencies:
+ *   glew & GLFW
+ *   STL
+ *   dear imgui
+ *   ImGuizmo
+ *   tinyobj
+ * 
+ * Missing things (not planned to be added):
+ *   CMake support/multiplatform
+ *   Support for quad meshes
+ *   Texture and UV support
+ *   Shadow mapping
+ *   TAA/Post effects
+ *   Probably lots of things regarding the API.
+*/
+
 #ifndef TINYRENDER_CPP_INCLUDED
 #define TINYRENDER_CPP_INCLUDED
 
@@ -11,7 +78,7 @@
 
 namespace tinyrender
 {
-	// Minimalist quick & dirty maths. Not here for completeness.
+	// Minimalist quick & dirty maths. Not here for completeness. Use with caution!
 	template<typename T>
 	inline T min(const T& a, const T& b)
 	{
@@ -443,9 +510,13 @@ namespace tinyrender
 	void updateObject(int id, const object& obj);
 	void updateObject(int id, const v3f& translation, const v3f& rotation, const v3f& scale);
 	void updateObject(int id, const std::vector<v3f>& newColors);
+	void setObjectPosition(int id, const v3f& translation);
+	void setObjectRotation(int id, const v3f& rotation);
+	void setObjectScale(int id, const v3f& scale);
 	aabb getBoundingBox(int id);
 
 	// Scene parameters
+	void setSelectionInViewportEnabled(bool enabled);
 	void setGuizmoEnabled(bool enabled);
 	void setDoLighting(bool doLighting);
 	void setDrawWireframe(bool drawWireframe);

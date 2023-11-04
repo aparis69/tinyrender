@@ -1199,6 +1199,93 @@ namespace tinyrender
 	}
 
 	/*!
+	\brief Update an object position given its id.
+	\param id object id
+	\param translation new position of the object
+	*/
+	void setObjectPosition(int id, const v3f& translation)
+	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+		assert(id >= 0 && id < internalObjects.size());
+		objectInternal& obj = internalObjects[id];		
+		v3f t, r, s;
+		ImGuizmo::DecomposeMatrixToComponents(
+			obj.mesh.modelMatrix.m,
+			&t.x,
+			&r.x,
+			&s.x
+		);
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&translation.x,
+			&r.x,
+			&s.x,
+			obj.mesh.modelMatrix.m
+		);
+
+		v3f rot = { 0, 0, 0 };
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&translation.x, &rot.x, &s.x,
+			obj.meshBbox.modelMatrix.m
+		);
+	}
+	
+	/*!
+	\brief Update an object rotation given its id.
+	\param id object id
+	\param rotation new per-axis rotation of the object
+	*/
+	void setObjectRotation(int id, const v3f& rotation)
+	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+		assert(id >= 0 && id < internalObjects.size());
+		objectInternal& obj = internalObjects[id];
+		v3f t, r, s;
+		ImGuizmo::DecomposeMatrixToComponents(
+			obj.mesh.modelMatrix.m,
+			&t.x,
+			&r.x,
+			&s.x
+		);
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&t.x,
+			&rotation.x,
+			&s.x,
+			obj.mesh.modelMatrix.m
+		);
+	}
+
+	/*!
+	\brief Update an object rotation given its id.
+	\param id object id
+	\param scale new scale of the object
+	*/
+	void setObjectScale(int id, const v3f& scale)
+	{
+		assert(initWasCalled && "You must call tinyrender::init() before anything else");
+		assert(id >= 0 && id < internalObjects.size());
+		objectInternal& obj = internalObjects[id];
+		v3f t, r, s;
+		ImGuizmo::DecomposeMatrixToComponents(
+			obj.mesh.modelMatrix.m,
+			&t.x,
+			&r.x,
+			&s.x
+		);
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&t.x,
+			&r.x,
+			&scale.x,
+			obj.mesh.modelMatrix.m
+		);
+
+		v3f rot = { 0, 0, 0 };
+		ImGuizmo::RecomposeMatrixFromComponents(
+			&t.x, &rot.x, &scale.x,
+			obj.meshBbox.modelMatrix.m
+		);
+	}
+
+	/*!
 	\brief Get the bounding box of an existing object.
 	\param id object id
 	*/
@@ -1209,6 +1296,15 @@ namespace tinyrender
 		return internalObjects[id].boundingBox;
 	}
 
+
+	/*!
+	\brief Enable or disable the selection in the viewport in the app.
+	\param enabled new state
+	*/
+	void setSelectionInViewportEnabled(bool enabled)
+	{
+		internalScene.userSelectionInViewportEnabled = enabled;
+	}
 
 	/*!
 	\brief Enable or disable the guizmo tool in the app.

@@ -24,7 +24,7 @@ static void ExampleLoadMesh()
 
 static void ExamplePrimitives() 
 {
-	tinyrender::init("tinyrender - primitives", 800, 600);
+	tinyrender::init("tinyrender - primitives");
 	tinyrender::setCameraAt({ 0.f, 0.f, 0.f });
 	tinyrender::setCameraEye({ 0.f, 1.f, -10.0f });
 
@@ -75,18 +75,29 @@ static void ExampleHeavyScene()
 	tinyrender::terminate();
 }
 
-static void ExampleAnimatedObject()
+static void ExampleAnimatedObjects()
 {
 	tinyrender::init("tinyrender - primitives", 800, 600);
 	tinyrender::setCameraAt({ 0.f, 0.f, 0.f });
 	tinyrender::setCameraEye({ 0.f, 1.f, -10.0f });
 
-	const int id = tinyrender::addSphere(1.0f, 16);
+	const int idBox = tinyrender::addBox(1.0f);
+	const int idSphere1 = tinyrender::addSphere(0.5f, 16);
+	const int idSphere2 = tinyrender::addSphere(0.25f, 16);
 
+	float rot = 0.0f;
 	while (!tinyrender::shouldQuit())
 	{
+		const float t = tinyrender::globalTime();
+		float x = cos(t * 1.5f) * 1.5f;
+		float z = sin(t * 1.5f) * 1.5f;
+		tinyrender::setObjectPosition(idSphere1, { x, 0.0f, z });
+		tinyrender::setObjectPosition(idSphere2, { 0.0f, z, x });
 
-		// TODO: animation of the sphere around the box
+		rot += 40.0f * tinyrender::deltaTime();
+		if (rot > 360.0f)
+			rot = 0.0f;
+		tinyrender::setObjectRotation(idBox, { rot, 0.0f, 0.0f });
 
 		tinyrender::update();
 		tinyrender::render();
@@ -95,18 +106,13 @@ static void ExampleAnimatedObject()
 	tinyrender::terminate();
 }
 
-static void ExampleAnimatedMesh()
-{
-	// TODO
-}
 
 int main() 
 {
 	//ExampleLoadMesh();
 	ExamplePrimitives();
 	//ExampleHeavyScene();
-	//ExampleAnimatedObject();
-	//ExampleAnimatedMesh();
+	//ExampleAnimatedObjects();
 
 	return 0;
 }
